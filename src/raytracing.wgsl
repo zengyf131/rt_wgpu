@@ -36,7 +36,7 @@ var<storage, read> material_list: array<Material>;
 var<storage, read> texture_list: array<Texture>;
 
 @group(1) @binding(4)
-var<storage, read> tex_data: array<vec4<f32>>;
+var<storage, read> tex_data: array<f32>;
 
 @fragment
 fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
@@ -509,10 +509,18 @@ fn texture_value(
                 );
                 let i = u32(clamp_uv.x * img_w);
                 let j = u32(clamp_uv.y * img_h);
-                let index = j * u32(img_w) + i;
-                let pixel = tex_data[tex.start + index];
+                let index = 4u * (j * u32(img_w) + i);
+                let r = tex_data[tex.start + index];
+                let g = tex_data[tex.start + index + 1u];
+                let b = tex_data[tex.start + index + 2u];
 
-                return srgb_to_linear(pixel.xyz);
+                return srgb_to_linear(vec3(r, g, b));
+            }
+            case 3u: { // noise
+                let point_count = u32(tex.data0.x);
+                let scale = tex.data0.y;
+
+                return vec3(0.5, 0.5, 0.5) * (1.0 + sin(scale * p.z + 10.0 * noise_turb(tex.start, point_count, p, 7u)));
             }
             default: {
                 return vec3(0.0, 0.0, 0.0);
@@ -521,6 +529,45 @@ fn texture_value(
     }
 
     return vec3(0.0, 0.0, 0.0);
+}
+
+fn noise(tex_start: u32, point_count: u32, p: vec3<f32>) -> f32 {
+    var uvw = p - floor(p);
+    let i = i32(floor(p.x));
+    let j = i32(floor(p.y));
+    let k = i32(floor(p.z));
+    var c = array<vec3<f32>, 8>();
+    for (var di = 0u; di < 2u; di += 1u) {
+        for (var dj = 0u; dj < 2u; dj += 1u) {
+            for (var dk = 0u; dk < 2u; dk += 1u) {
+                let perm_x = bitcast<u32>(tex_data[tex_start + point_count * 3u + u32((i+i32(di)) & 255)]);
+                let perm_y = bitcast<u32>(tex_data[tex_start + point_count * 4u + u32((j+i32(dj)) & 255)]);
+                let perm_z = bitcast<u32>(tex_data[tex_start + point_count * 5u + u32((k+i32(dk)) & 255)]);
+                c[di * 4u + dj * 2u + dk] = vec3(
+                    tex_data[tex_start + 3u * (perm_x ^ perm_y ^ perm_z)],
+                    tex_data[tex_start + 3u * (perm_x ^ perm_y ^ perm_z) + 1u],
+                    tex_data[tex_start + 3u * (perm_x ^ perm_y ^ perm_z) + 2u],
+                );
+            }
+        }
+    }
+
+    let rand_float = trilinear_interp(c, uvw);
+    return rand_float;
+}
+
+fn noise_turb(tex_start: u32, point_count: u32, p: vec3<f32>, depth: u32) -> f32 {
+    var accum = 0.0;
+    var temp_p = p;
+    var weight = 1.0;
+
+    for (var i = 0u; i < depth; i += 1u) {
+        accum += weight * noise(tex_start, point_count, temp_p);
+        weight *= 0.5;
+        temp_p *= 2.0;
+    }
+
+    return abs(accum);
 }
 
 // Utils
@@ -554,6 +601,28 @@ fn srgb_to_linear(c: vec3<f32>) -> vec3<f32> {
 fn vec3_near_zero(v: vec3<f32>) -> bool {
     let s = 1e-8;
     return (abs(v.x) < s) && (abs(v.y) < s) && (abs(v.z) < s);
+}
+
+fn trilinear_interp(c: array<vec3<f32>, 8>, uvw: vec3<f32>) -> f32 {
+    let new_uvw = uvw * uvw * (3.0 - 2.0 * uvw);
+    var accum = 0.0;
+    for (var i = 0u; i < 2u; i += 1u) {
+        for (var j = 0u; j < 2u; j += 1u) {
+            for (var k = 0u; k < 2u; k += 1u) {
+                let weight_v = vec3(
+                    uvw.x - f32(i),
+                    uvw.y - f32(j),
+                    uvw.z - f32(k),
+                );
+                accum += (f32(i)*new_uvw.x + f32(1u-i)*(1.0-new_uvw.x))
+                    * (f32(j)*new_uvw.y + f32(1u-j)*(1.0-new_uvw.y))
+                    * (f32(k)*new_uvw.z + f32(1u-k)*(1.0-new_uvw.z))
+                    * dot(c[i * 4u + j * 2u + k], weight_v);
+            }
+        }
+    }
+
+    return accum;
 }
 
 // Random

@@ -104,7 +104,7 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let (camera, world) = earth(image_width);
+        let (camera, world) = perlin_spheres(image_width);
         let renderer = PathTracing::new(&device, &config, &camera, world);
         let egui_renderer = EguiRenderer::new(&device, config.format, window.clone());
 

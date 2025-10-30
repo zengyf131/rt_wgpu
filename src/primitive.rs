@@ -1,3 +1,5 @@
+use std::{rc::Rc, cell::RefCell};
+
 use crate::material::Material;
 use crate::structure::*;
 use crate::utils::*;
@@ -11,11 +13,11 @@ pub struct Sphere {
     center: Vec3,
     center_dir: Vec3,
     radius: f32,
-    mat: Box<dyn Material>,
+    mat: Rc<RefCell<dyn Material>>,
     aabb: AABB,
 }
 impl Sphere {
-    pub fn sphere(center: Vec3, radius: f32, mat: Box<dyn Material>) -> Self {
+    pub fn sphere(center: Vec3, radius: f32, mat: Rc<RefCell<dyn Material>>) -> Self {
         let rvec = vec3(radius, radius, radius);
         Self {
             center,
@@ -26,7 +28,7 @@ impl Sphere {
         }
     }
 
-    pub fn sphere_moving(center1: Vec3, center2: Vec3, radius: f32, mat: Box<dyn Material>) -> Self {
+    pub fn sphere_moving(center1: Vec3, center2: Vec3, radius: f32, mat: Rc<RefCell<dyn Material>>) -> Self {
         let rvec = vec3(radius, radius, radius);
         let box1 = AABB::from_points(center1 - rvec, center1 + rvec);
         let box2 = AABB::from_points(center2 - rvec, center2 + rvec);
@@ -41,15 +43,15 @@ impl Sphere {
 }
 impl Primitive for Sphere {
     fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
-        if self.mat.mat_id() < 0 {
-            let _ = self.mat.to_raw(raw_vec);
+        if self.mat.borrow().mat_id() < 0 {
+            let _ = self.mat.borrow_mut().to_raw(raw_vec);
         }
         let this_raw = PrimitiveRaw {
             data0: [self.center.x, self.center.y, self.center.z, self.radius],
             data1: [self.center_dir.x, self.center_dir.y, self.center_dir.z, 0.0],
 
             type_id: 1,
-            mat_id: self.mat.mat_id(),
+            mat_id: self.mat.borrow().mat_id(),
             left_child_id: -1,
             right_child_id: -1,
             next_elem_id: -1,
