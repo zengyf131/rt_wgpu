@@ -288,38 +288,42 @@ struct Primitive {
 
 struct HitStackEntry {
     pid: u32,
+    stage: u32,
+    hit: bool,
+    report_index: i32,
 }
 
-fn primitive_hit(pid: u32, r: Ray, _ray_t: Interval, rec: ptr<function, HitRecord>) -> bool {
+fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitRecord>) -> bool {
     var stack: array<HitStackEntry, 32>;
     var stack_top = 1u;
     var hit = false;
+    var r = _r;
     var ray_t = _ray_t;
 
-    stack[0] = HitStackEntry(pid);
+    stack[0] = HitStackEntry(pid, 0u, false, -1);
 
     while (stack_top > 0u) {
         stack_top -= 1u;
-        let this_entry = stack[stack_top];
+        var this_entry = stack[stack_top];
         let p = primitive_list[this_entry.pid];
 
         if p.next_elem_id >= 0 {
-            stack[stack_top] = HitStackEntry(u32(p.next_elem_id));
+            stack[stack_top] = HitStackEntry(u32(p.next_elem_id), 0u, false, this_entry.report_index);
             stack_top += 1u;
         }
 
         switch p.type_id {
-            case 0u: { // bvh node
+            case 0u: { // bvh node or prim list
                 if !aabb_hit(p.aabb, r, ray_t) {
                     continue;
                 }
 
                 if p.right_id >= 0 {
-                    stack[stack_top] = HitStackEntry(u32(p.right_id));
+                    stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, false, this_entry.report_index);
                     stack_top += 1u;
                 }
                 if p.left_id >= 0 {
-                    stack[stack_top] = HitStackEntry(u32(p.left_id));
+                    stack[stack_top] = HitStackEntry(u32(p.left_id), 0u, false, this_entry.report_index);
                     stack_top += 1u;
                 }
             }
@@ -357,7 +361,9 @@ fn primitive_hit(pid: u32, r: Ray, _ray_t: Interval, rec: ptr<function, HitRecor
                 (*rec).mat_id = u32(p.mat_id);
 
                 hit = true;
+                this_entry.hit = true;
                 ray_t = Interval(ray_t.min, root);
+                
             }
             case 2u: { // quad
                 let q = p.data0.xyz;
@@ -388,9 +394,85 @@ fn primitive_hit(pid: u32, r: Ray, _ray_t: Interval, rec: ptr<function, HitRecor
                 (*rec).uv = vec2(alpha, beta);
 
                 hit = true;
+                this_entry.hit = true;
                 ray_t = Interval(ray_t.min, t);
             }
+            case 3u: { // translate
+                let offset = p.data0.xyz;
+
+                switch this_entry.stage {
+                    case 0u: {
+                        r.orig -= offset;
+                        stack[stack_top] = HitStackEntry(this_entry.pid, 1u, false, this_entry.report_index);
+                        stack[stack_top + 1u] = HitStackEntry(u32(p.right_id), 0u, false, i32(stack_top));
+                        stack_top += 2u;
+                    }
+                    case 1u: {
+                        r.orig += offset;
+
+                        if this_entry.hit {
+                            (*rec).p += offset;
+                        }
+                    }
+                    default: {}
+                }
+            }
+            case 4u: { // rotate_y
+                let sin_theta = p.data0.x;
+                let cos_theta = p.data0.y;
+
+                switch this_entry.stage {
+                    case 0u: {
+                        let origin = vec3(
+                            cos_theta * r.orig.x - sin_theta * r.orig.z,
+                            r.orig.y,
+                            sin_theta * r.orig.x + cos_theta * r.orig.z,
+                        );
+                        let direction = vec3(
+                            cos_theta * r.dir.x - sin_theta * r.dir.z,
+                            r.dir.y,
+                            sin_theta * r.dir.x + cos_theta * r.dir.z,
+                        );
+                        r = Ray(origin, direction, r.tm);
+
+                        stack[stack_top] = HitStackEntry(this_entry.pid, 1u, false, this_entry.report_index);
+                        stack[stack_top + 1u] = HitStackEntry(u32(p.right_id), 0u, false, i32(stack_top));
+                        stack_top += 2u;
+                    }
+                    case 1u: {
+                        let origin = vec3(
+                            cos_theta * r.orig.x + sin_theta * r.orig.z,
+                            r.orig.y,
+                            -sin_theta * r.orig.x + cos_theta * r.orig.z,
+                        );
+                        let direction = vec3(
+                            cos_theta * r.dir.x + sin_theta * r.dir.z,
+                            r.dir.y,
+                            -sin_theta * r.dir.x + cos_theta * r.dir.z,
+                        );
+                        r = Ray(origin, direction, r.tm);
+
+                        if this_entry.hit {
+                            (*rec).p = vec3(
+                                cos_theta * (*rec).p.x + sin_theta * (*rec).p.z,
+                                (*rec).p.y,
+                                -sin_theta * (*rec).p.x + cos_theta * (*rec).p.z,
+                            );
+                            (*rec).normal = vec3(
+                                cos_theta * (*rec).normal.x + sin_theta * (*rec).normal.z,
+                                (*rec).normal.y,
+                                -sin_theta * (*rec).normal.x + cos_theta * (*rec).normal.z,
+                            );
+                        }
+                    }
+                    default: {}
+                }
+            }
             default: {}
+        }
+
+        if this_entry.hit && this_entry.report_index >= 0 {
+            stack[u32(this_entry.report_index)].hit = true;
         }
     }
 

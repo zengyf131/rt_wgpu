@@ -1,5 +1,7 @@
 use std::{rc::Rc, cell::RefCell};
 
+use cgmath::Bounded;
+
 use crate::material::Material;
 use crate::structure::*;
 use crate::utils::*;
@@ -94,6 +96,25 @@ impl PrimitiveList {
 }
 impl Primitive for PrimitiveList {
     fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+        let this_pid = raw_vec.primitives.len();
+        let this_raw = PrimitiveRaw {
+            type_id: 0,
+            mat_id: -1,
+            left_child_id: -1,
+            right_child_id: -1,
+            next_elem_id: -1,
+            aabb: self.aabb,
+            _pad: [0; 1],
+
+            data0: [0.0; 4],
+            data1: [0.0; 4],
+            data2: [0.0; 4],
+            data3: [0.0; 4],
+            data4: [0.0; 4],
+        };
+
+        raw_vec.primitives.push(this_raw);
+
         let mut first_pid: usize = 0;
         let mut prev_pid: usize = 0;
         for i in 0..self.prim_list.len() {
@@ -108,7 +129,9 @@ impl Primitive for PrimitiveList {
             prev_pid = pid;
         }
 
-        return first_pid;
+        raw_vec.primitives[this_pid].right_child_id = first_pid as i32;
+
+        return this_pid;
     }
 
     fn aabb(&self) -> AABB {
@@ -264,6 +287,129 @@ impl Primitive for Quad {
 
         raw_vec.primitives.push(this_raw);
         return raw_vec.primitives.len() - 1;
+    }
+
+    fn aabb(&self) -> AABB {
+        self.aabb
+    }
+}
+
+pub struct Translate {
+    object: Box<dyn Primitive>,
+    offset: Vec3,
+    aabb: AABB,
+}
+impl Translate {
+    pub fn new(object: Box<dyn Primitive>, offset: Vec3) -> Self {
+        let aabb = object.aabb() + offset;
+        Self {
+            object,
+            offset,
+            aabb,
+        }
+    }
+}
+impl Primitive for Translate {
+    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+        let this_pid = raw_vec.primitives.len();
+        let this_raw = PrimitiveRaw {
+            type_id: 3,
+            mat_id: -1,
+            left_child_id: -1,
+            right_child_id: -1,
+            next_elem_id: -1,
+            aabb: self.aabb,
+            _pad: [0; 1],
+
+            data0: [self.offset.x, self.offset.y, self.offset.z, 0.0],
+            data1: [0.0; 4],
+            data2: [0.0; 4],
+            data3: [0.0; 4],
+            data4: [0.0; 4],
+        };
+        raw_vec.primitives.push(this_raw);
+
+        let child_pid = self.object.to_raw(raw_vec);
+
+        raw_vec.primitives[this_pid].right_child_id = child_pid as i32;
+
+        return this_pid;
+    }
+
+    fn aabb(&self) -> AABB {
+        self.aabb
+    }
+}
+
+pub struct RotateY {
+    object: Box<dyn Primitive>,
+    sin_theta: f32,
+    cos_theta: f32,
+    aabb: AABB,
+}
+impl RotateY {
+    pub fn new(object: Box<dyn Primitive>, angle: Degrees) -> Self {
+        let sin_theta = Deg::sin(angle);
+        let cos_theta = Deg::cos(angle);
+        let mut aabb = object.aabb();
+
+        let mut min = Vec3::max_value();
+        let mut max = -Vec3::max_value();
+
+        for i in 0..2 {
+            for j in 0..2 {
+                for k in 0..2 {
+                    let x = i as f32 * aabb.x.max + (1 - i) as f32 * aabb.x.min;
+                    let y = j as f32 * aabb.y.max + (1 - j) as f32 * aabb.y.min;
+                    let z = k as f32 * aabb.z.max + (1 - k) as f32 * aabb.z.min;
+                    let tester = vec3(
+                        cos_theta * x + sin_theta * z,
+                        y,
+                        -sin_theta * x + cos_theta * z
+                    );
+                    for c in 0..3 {
+                        min[c] = min[c].min(tester[c]);
+                        max[c] = max[c].max(tester[c]);
+                    }
+                }
+            }
+        }
+
+        aabb = AABB::from_points(min, max);
+
+        Self {
+            object,
+            sin_theta,
+            cos_theta,
+            aabb,
+        }
+    }
+}
+impl Primitive for RotateY {
+    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+        let this_pid = raw_vec.primitives.len();
+        let this_raw = PrimitiveRaw {
+            type_id: 4,
+            mat_id: -1,
+            left_child_id: -1,
+            right_child_id: -1,
+            next_elem_id: -1,
+            aabb: self.aabb,
+            _pad: [0; 1],
+
+            data0: [self.sin_theta, self.cos_theta, 0.0, 0.0],
+            data1: [0.0; 4],
+            data2: [0.0; 4],
+            data3: [0.0; 4],
+            data4: [0.0; 4],
+        };
+        raw_vec.primitives.push(this_raw);
+
+        let child_pid = self.object.to_raw(raw_vec);
+
+        raw_vec.primitives[this_pid].right_child_id = child_pid as i32;
+
+        return this_pid;
     }
 
     fn aabb(&self) -> AABB {

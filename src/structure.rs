@@ -109,6 +109,16 @@ impl Interval {
         self.max - self.min
     }
 }
+impl std::ops::Add<f32> for Interval {
+    type Output = Self;
+
+    fn add(self, rhs: f32) -> Self::Output {
+        Self {
+            min: self.min + rhs,
+            max: self.max + rhs,
+        }
+    }
+}
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
@@ -192,6 +202,17 @@ impl AABB {
         }
         if self.z.size() < delta {
             self.z = self.z.expand(delta);
+        }
+    }
+}
+impl std::ops::Add<Vec3> for AABB {
+    type Output = Self;
+
+    fn add(self, rhs: Vec3) -> Self::Output {
+        Self {
+            x: self.x + rhs.x,
+            y: self.y + rhs.y,
+            z: self.z + rhs.z,
         }
     }
 }

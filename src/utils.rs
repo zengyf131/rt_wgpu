@@ -29,6 +29,14 @@ extern "C" {
     pub fn get_time_milliseconds() -> f64;
 }
 
+pub const fn degrees<T>(v: T) -> Deg<T> {
+    cgmath::Deg(v)
+}
+
+pub const fn radians<T>(v: T) -> Rad<T> {
+    cgmath::Rad(v)
+}
+
 pub struct Timer {
     start_time: Option<f64>,
     accumulated: f64,

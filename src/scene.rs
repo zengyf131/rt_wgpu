@@ -266,7 +266,39 @@ pub fn cornell_box() -> (Camera, Box<dyn Primitive>) {
     world.add(Box::new(Quad::new(vec3(343.0, 554.0, 332.0), vec3(-130.0,0.0,0.0), vec3(0.0,0.0,-105.0), light)));
     world.add(Box::new(Quad::new(vec3(0.0,0.0,0.0), vec3(555.0,0.0,0.0), vec3(0.0,0.0,555.0), white.clone())));
     world.add(Box::new(Quad::new(vec3(555.0,555.0,555.0), vec3(-555.0,0.0,0.0), vec3(0.0,0.0,-555.0), white.clone())));
-    world.add(Box::new(Quad::new(vec3(0.0,0.0,555.0), vec3(555.0,0.0,0.0), vec3(0.0,555.0,0.0), white)));
+    world.add(Box::new(Quad::new(vec3(0.0,0.0,555.0), vec3(555.0,0.0,0.0), vec3(0.0,555.0,0.0), white.clone())));
+
+    let box1 = quad_box(vec3(0.0, 0.0, 0.0), vec3(165.0, 330.0, 165.0), white.clone());
+    let box1 = Box::new(RotateY::new(box1, degrees(15.0)));
+    let box1 = Box::new(Translate::new(box1, vec3(265.0, 0.0, 295.0)));
+    world.add(box1);
+
+    let box2 = quad_box(vec3(0.0, 0.0, 0.0), vec3(165.0, 165.0, 165.0), white);
+    let box2 = Box::new(RotateY::new(box2, degrees(-18.0)));
+    let box2 = Box::new(Translate::new(box2, vec3(130.0, 0.0, 65.0)));
+    world.add(box2);
 
     (camera, world)
+}
+
+// Returns the 3D box (six sides) that contains the two opposite vertices a & b.
+fn quad_box(a: Vec3, b: Vec3, mat: Rc<RefCell<dyn Material>>) -> Box<PrimitiveList> {
+    let mut sides = Box::new(PrimitiveList::new());
+
+    // Construct the two opposite vertices with the minimum and maximum coordinates.
+    let min = vec3(a.x.min(b.x), a.y.min(b.y), a.z.min(b.z));
+    let max = vec3(a.x.max(b.x), a.y.max(b.y), a.z.max(b.z));
+
+    let dx = vec3(max.x - min.x, 0.0, 0.0);
+    let dy = vec3(0.0, max.y - min.y, 0.0);
+    let dz = vec3(0.0, 0.0, max.z - min.z);
+
+    sides.add(Box::new(Quad::new(vec3(min.x, min.y, max.z),  dx,  dy, mat.clone()))); // front
+    sides.add(Box::new(Quad::new(vec3(max.x, min.y, max.z), -dz,  dy, mat.clone()))); // right
+    sides.add(Box::new(Quad::new(vec3(max.x, min.y, min.z), -dx,  dy, mat.clone()))); // back
+    sides.add(Box::new(Quad::new(vec3(min.x, min.y, min.z),  dz,  dy, mat.clone()))); // left
+    sides.add(Box::new(Quad::new(vec3(min.x, max.y, max.z),  dx, -dz, mat.clone()))); // top
+    sides.add(Box::new(Quad::new(vec3(min.x, min.y, min.z),  dx,  dz, mat))); // bottom
+
+    sides
 }
