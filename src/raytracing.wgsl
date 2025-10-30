@@ -276,6 +276,9 @@ struct Primitive {
 
     data0: vec4<f32>,
     data1: vec4<f32>,
+    data2: vec4<f32>,
+    data3: vec4<f32>,
+    data4: vec4<f32>,
 }
 
 struct HitStackEntry {
@@ -347,8 +350,40 @@ fn primitive_hit(pid: u32, r: Ray, _ray_t: Interval, rec: ptr<function, HitRecor
                 hit_record_set_face_normal(rec, r, outward_normal);
                 (*rec).uv = get_sphere_uv(outward_normal);
                 (*rec).mat_id = u32(p.mat_id);
+
                 hit = true;
                 ray_t = Interval(ray_t.min, root);
+            }
+            case 2u: { // quad
+                let q = p.data0.xyz;
+                let u = p.data1.xyz;
+                let v = p.data2.xyz;
+                let normal = p.data3.xyz;
+                let d = p.data3.w;
+                let w = p.data4.xyz;
+
+                // Plane test
+                let denom = dot(normal, r.dir);
+                if abs(denom) < 1e-8 { continue; }
+                let t = (d - dot(normal, r.orig)) / denom;
+                if !interval_contains(ray_t, t) { continue; }
+
+                // Interior test
+                let intersection = ray_at(r, t);
+                let planar_hitpt_vector = intersection - q;
+                let alpha = dot(w, cross(planar_hitpt_vector, v));
+                let beta = dot(w, cross(u, planar_hitpt_vector));
+                let unit_interval = Interval(0.0, 1.0);
+                if !interval_contains(unit_interval, alpha) || !interval_contains(unit_interval, beta) { continue; }
+
+                (*rec).t = t;
+                (*rec).p = intersection;
+                (*rec).mat_id = u32(p.mat_id);
+                hit_record_set_face_normal(rec, r, normal);
+                (*rec).uv = vec2(alpha, beta);
+
+                hit = true;
+                ray_t = Interval(ray_t.min, t);
             }
             default: {}
         }

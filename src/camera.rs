@@ -6,7 +6,7 @@ use cgmath::{Vector3, prelude::*, vec3};
 
 pub struct Camera {
     pub image_width: u32,
-    pub aspect_ratio: f32,
+    pub image_height: u32,
     pub samples_per_pixel: u32,
     pub max_depth: u32,
     pub samples_per_frame: u32,
@@ -19,12 +19,12 @@ pub struct Camera {
 }
 impl Camera {
     pub fn to_raw(&self) -> CameraUniforms {
-        let image_height = (self.image_width as f32 / self.aspect_ratio) as u32;
+        let aspect_ratio = self.image_width as f32 / self.image_height as f32;
         let center = self.lookfrom;
         let theta = self.vfov.to_radians();
         let h = f32::tan(theta / 2.0);
         let viewport_height: f32 = 2.0 * h * self.focus_dist;
-        let viewport_width: f32 = viewport_height * self.aspect_ratio;
+        let viewport_width: f32 = viewport_height * aspect_ratio;
 
         let w = (self.lookfrom - self.lookat).normalize();
         let u = self.vup.cross(w).normalize();
@@ -32,7 +32,7 @@ impl Camera {
         let viewport_u = viewport_width * u;
         let viewport_v = viewport_height * -v;
         let pixel_delta_u = viewport_u / self.image_width as f32;
-        let pixel_delta_v = viewport_v / image_height as f32;
+        let pixel_delta_v = viewport_v / self.image_height as f32;
         let viewport_upper_left = center - (self.focus_dist * w) - viewport_u / 2.0 - viewport_v / 2.0;
         let pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
@@ -41,7 +41,7 @@ impl Camera {
         let defocus_disk_v = v * defocus_radius;
 
         CameraUniforms {
-            image_wh: [self.image_width, image_height],
+            image_wh: [self.image_width, self.image_height],
             samples_per_pixel: self.samples_per_pixel,
             max_depth: self.max_depth,
             frame_id: 0,

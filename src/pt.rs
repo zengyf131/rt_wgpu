@@ -215,6 +215,9 @@ impl PathTracing {
 
         let mut raw_vec = RawVec::new();
         let root_id = world.to_raw(&mut raw_vec);
+        if raw_vec.tex_data.is_empty() {
+            raw_vec.tex_data.push(0.0);
+        }
         // log!("{:?}, {:?}", materials_raw, primitives_raw);
 
         let scene_uniforms = SceneUniforms {

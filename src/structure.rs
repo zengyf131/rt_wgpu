@@ -46,6 +46,9 @@ pub struct PrimitiveRaw {
 
     pub data0: [f32; 4],
     pub data1: [f32; 4],
+    pub data2: [f32; 4],
+    pub data3: [f32; 4],
+    pub data4: [f32; 4],
 }
 
 #[repr(C)]
@@ -132,7 +135,10 @@ impl AABB {
             Interval { min: b.z, max: a.z }
         };
 
-        Self { x, y, z }
+        let mut aabb = Self { x, y, z };
+        aabb.pad_to_minimums();
+
+        aabb
     }
 
     pub fn merge_aabbs(a: Self, b: Self) -> Self {
@@ -173,6 +179,19 @@ impl AABB {
             } else {
                 return 2;
             }
+        }
+    }
+
+    fn pad_to_minimums(&mut self) {
+        let delta: f32 = 0.0001;
+        if self.x.size() < delta {
+            self.x = self.x.expand(delta);
+        }
+        if self.y.size() < delta {
+            self.y = self.y.expand(delta);
+        }
+        if self.z.size() < delta {
+            self.z = self.z.expand(delta);
         }
     }
 }

@@ -10,11 +10,11 @@ use crate::primitive::*;
 use crate::texture::*;
 use crate::utils::*;
 
-pub fn get_world_0(image_width: u32) -> (Camera, Box<dyn Primitive>) {
+pub fn get_world_0() -> (Camera, Box<dyn Primitive>) {
 
     let camera = Camera {
-        image_width,
-        aspect_ratio: 16.0 / 9.0,
+        image_width: 1920,
+        image_height: 1080,
         samples_per_pixel: 500,
         max_depth: 50,
         samples_per_frame: 1,
@@ -43,11 +43,11 @@ pub fn get_world_0(image_width: u32) -> (Camera, Box<dyn Primitive>) {
     (camera, Box::new(world))
 }
 
-pub fn bouncing_spheres(image_width: u32) -> (Camera, Box<dyn Primitive>) {
+pub fn bouncing_spheres() -> (Camera, Box<dyn Primitive>) {
 
     let camera = Camera {
-        image_width,
-        aspect_ratio: 16.0 / 9.0,
+        image_width: 1920,
+        image_height: 1080,
         samples_per_pixel: 50,
         max_depth: 50,
         samples_per_frame: 1,
@@ -119,11 +119,11 @@ pub fn bouncing_spheres(image_width: u32) -> (Camera, Box<dyn Primitive>) {
     (camera, Box::new(world))
 }
 
-pub fn earth(image_width: u32) -> (Camera, Box<dyn Primitive>) {
+pub fn earth() -> (Camera, Box<dyn Primitive>) {
 
     let camera = Camera {
-        image_width,
-        aspect_ratio: 16.0 / 9.0,
+        image_width: 1920,
+        image_height: 1080,
         samples_per_pixel: 100,
         max_depth: 50,
         samples_per_frame: 1,
@@ -142,11 +142,11 @@ pub fn earth(image_width: u32) -> (Camera, Box<dyn Primitive>) {
     (camera, globe)
 }
 
-pub fn perlin_spheres(image_width: u32) -> (Camera, Box<dyn Primitive>) {
+pub fn perlin_spheres() -> (Camera, Box<dyn Primitive>) {
 
     let camera = Camera {
-        image_width,
-        aspect_ratio: 16.0 / 9.0,
+        image_width: 1920,
+        image_height: 1080,
         samples_per_pixel: 100,
         max_depth: 50,
         samples_per_frame: 1,
@@ -163,6 +163,41 @@ pub fn perlin_spheres(image_width: u32) -> (Camera, Box<dyn Primitive>) {
     let pertext = Rc::new(RefCell::new(NoiseTexture::new(4.0)));
     world.add(Box::new(Sphere::sphere(vec3(0.0,-1000.0,0.0), 1000.0, Rc::new(RefCell::new(Lambertian::new(pertext.clone()))))));
     world.add(Box::new(Sphere::sphere(vec3(0.0,2.0,0.0), 2.0, Rc::new(RefCell::new(Lambertian::new(pertext))))));
+
+    (camera, world)
+}
+
+pub fn quads() -> (Camera, Box<dyn Primitive>) {
+
+    let camera = Camera {
+        image_width: 1080,
+        image_height: 1080,
+        samples_per_pixel: 100,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 80.0,
+        lookfrom: vec3(0.0, 0.0, 9.0),
+        lookat: vec3(0.0, 0.0, 0.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+    };
+
+    let mut world = Box::new(PrimitiveList::new());
+
+    // Materials
+    let left_red     = Rc::new(RefCell::new(Lambertian::from_color(vec3(1.0, 0.2, 0.2))));
+    let back_green   = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.2, 1.0, 0.2))));
+    let right_blue   = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.2, 0.2, 1.0))));
+    let upper_orange = Rc::new(RefCell::new(Lambertian::from_color(vec3(1.0, 0.5, 0.0))));
+    let lower_teal   = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.2, 0.8, 0.8))));
+
+    // Quads
+    world.add(Box::new(Quad::new(vec3(-3.0,-2.0, 5.0), vec3(0.0, 0.0,-4.0), vec3(0.0, 4.0, 0.0), left_red)));
+    world.add(Box::new(Quad::new(vec3(-2.0,-2.0, 0.0), vec3(4.0, 0.0, 0.0), vec3(0.0, 4.0, 0.0), back_green)));
+    world.add(Box::new(Quad::new(vec3( 3.0,-2.0, 1.0), vec3(0.0, 0.0, 4.0), vec3(0.0, 4.0, 0.0), right_blue)));
+    world.add(Box::new(Quad::new(vec3(-2.0, 3.0, 1.0), vec3(4.0, 0.0, 0.0), vec3(0.0, 0.0, 4.0), upper_orange)));
+    world.add(Box::new(Quad::new(vec3(-2.0,-3.0, 5.0), vec3(4.0, 0.0, 0.0), vec3(0.0, 0.0,-4.0), lower_teal)));
 
     (camera, world)
 }

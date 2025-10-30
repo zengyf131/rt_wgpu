@@ -47,9 +47,6 @@ impl Primitive for Sphere {
             let _ = self.mat.borrow_mut().to_raw(raw_vec);
         }
         let this_raw = PrimitiveRaw {
-            data0: [self.center.x, self.center.y, self.center.z, self.radius],
-            data1: [self.center_dir.x, self.center_dir.y, self.center_dir.z, 0.0],
-
             type_id: 1,
             mat_id: self.mat.borrow().mat_id(),
             left_child_id: -1,
@@ -57,6 +54,12 @@ impl Primitive for Sphere {
             next_elem_id: -1,
             aabb: self.aabb,
             _pad: [0; 1],
+
+            data0: [self.center.x, self.center.y, self.center.z, self.radius],
+            data1: [self.center_dir.x, self.center_dir.y, self.center_dir.z, 0.0],
+            data2: [0.0; 4],
+            data3: [0.0; 4],
+            data4: [0.0; 4],
         };
 
         raw_vec.primitives.push(this_raw);
@@ -165,9 +168,6 @@ impl Primitive for BVHNode {
     fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
         let this_pid = raw_vec.primitives.len();
         let this_raw = PrimitiveRaw {
-            data0: [0.0; 4],
-            data1: [0.0; 4],
-
             type_id: 0,
             mat_id: -1,
             left_child_id: -1,
@@ -175,6 +175,12 @@ impl Primitive for BVHNode {
             next_elem_id: -1,
             aabb: self.aabb,
             _pad: [0; 1],
+
+            data0: [0.0; 4],
+            data1: [0.0; 4],
+            data2: [0.0; 4],
+            data3: [0.0; 4],
+            data4: [0.0; 4],
         };
 
         raw_vec.primitives.push(this_raw);
@@ -195,6 +201,69 @@ impl Primitive for BVHNode {
         this_raw.right_child_id = right_id;
 
         this_pid
+    }
+
+    fn aabb(&self) -> AABB {
+        self.aabb
+    }
+}
+
+pub struct Quad {
+    q: Vec3,
+    u: Vec3,
+    v: Vec3,
+    normal: Vec3,
+    d: f32,
+    w: Vec3,
+    mat: Rc<RefCell<dyn Material>>,
+    aabb: AABB,
+}
+impl Quad {
+    pub fn new(q: Vec3, u: Vec3, v: Vec3, mat: Rc<RefCell<dyn Material>>) -> Self {
+        let bbox_diagonal1 = AABB::from_points(q, q + u + v);
+        let bbox_diagonal2 = AABB::from_points(q + u, q + v);
+        let aabb = AABB::merge_aabbs(bbox_diagonal1, bbox_diagonal2);
+
+        let n = u.cross(v);
+        let normal = n.normalize();
+        let d = dot(normal, q);
+        let w = n / dot(n, n);
+
+        Self {
+            q,
+            u,
+            v,
+            normal,
+            d,
+            w,
+            mat,
+            aabb,
+        }
+    }
+}
+impl Primitive for Quad {
+    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+        if self.mat.borrow().mat_id() < 0 {
+            let _ = self.mat.borrow_mut().to_raw(raw_vec);
+        }
+        let this_raw = PrimitiveRaw {
+            type_id: 2,
+            mat_id: self.mat.borrow().mat_id(),
+            left_child_id: -1,
+            right_child_id: -1,
+            next_elem_id: -1,
+            aabb: self.aabb,
+            _pad: [0; 1],
+
+            data0: [self.q.x, self.q.y, self.q.z, 0.0],
+            data1: [self.u.x, self.u.y, self.u.z, 0.0],
+            data2: [self.v.x, self.v.y, self.v.z, 0.0],
+            data3: [self.normal.x, self.normal.y, self.normal.z, self.d],
+            data4: [self.w.x, self.w.y, self.w.z, 0.0],
+        };
+
+        raw_vec.primitives.push(this_raw);
+        return raw_vec.primitives.len() - 1;
     }
 
     fn aabb(&self) -> AABB {

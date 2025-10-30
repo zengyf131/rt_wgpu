@@ -40,8 +40,10 @@ impl State {
     // We don't need this to be async right now,
     // but we will in the next tutorial
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let image_width = 1920;
-        let image_height = 1080;
+        let (camera, world) = quads();
+
+        let image_width = camera.image_width;
+        let image_height = camera.image_height;
         let size = PhysicalSize::<u32>::new(image_width, image_height);
         let _ = window.request_inner_size(size);
 
@@ -104,7 +106,6 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let (camera, world) = perlin_spheres(image_width);
         let renderer = PathTracing::new(&device, &config, &camera, world);
         let egui_renderer = EguiRenderer::new(&device, config.format, window.clone());
 
