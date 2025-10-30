@@ -67,6 +67,7 @@ struct Camera {
     pixel00_loc: vec3<f32>,
     defocus_disk_u: vec3<f32>,
     defocus_disk_v: vec3<f32>,
+    background: vec3<f32>,
 }
 
 fn camera_render_pixel(pixel_loc: vec4<f32>, rng_state: ptr<function, u32>) -> vec4<f32> {
@@ -100,6 +101,7 @@ fn camera_ray_color(primary_ray: Ray, rng_state: ptr<function, u32>) -> vec3<f32
     var rec = hit_record_new();
     var ray_color = vec3(0.0);
     var attenuation = vec3(1.0);
+    var emission = vec3(0.0);
     var r = primary_ray;
 
     for (var depth = 0u; depth < camera.max_depth; depth += 1u) {
@@ -112,19 +114,22 @@ fn camera_ray_color(primary_ray: Ray, rng_state: ptr<function, u32>) -> vec3<f32
         if hit {
             var scattered = ray_new();
             var b_att = vec3(0.0);
+            let b_emit = material_emitted(rec.mat_id, rec.uv, rec.p);
             if material_scatter(rec.mat_id, r, rec, &b_att, &scattered, rng_state) {
                 r = scattered;
+                emission += attenuation * b_emit;
                 attenuation *= b_att;
+            } else {
+                emission += attenuation * b_emit;
+                break;
             }
         } else {
-            let unit_direction = normalize(r.dir);
-            let a = 0.5 * (unit_direction.y + 1.0);
-            ray_color = (1.0-a)*vec3(1.0, 1.0, 1.0) + a*vec3(0.5, 0.7, 1.0);
+            ray_color = camera.background;
             break;
         }
     }
 
-    return attenuation * ray_color;
+    return emission + attenuation * ray_color;
 }
 
 fn camera_get_ray(pixel_loc: vec2<f32>, rng_state: ptr<function, u32>) -> Ray {
@@ -478,8 +483,27 @@ fn material_scatter(
             (*attenuation) = vec3(1.0);
             return true;
         }
+        case 3u: { // diffuse light
+            return false;
+        }
         default: {
             return false;
+        }
+    }
+}
+
+fn material_emitted(
+    mat_id: u32,
+    uv: vec2<f32>,
+    p: vec3<f32>,
+) -> vec3<f32> {
+    let mat = material_list[mat_id];
+    switch mat.type_id {
+        case 3u: { // diffuse light
+            return texture_value(u32(mat.tex_id), uv, p);
+        }
+        default: {
+            return vec3(0.0);
         }
     }
 }
@@ -555,15 +579,15 @@ fn texture_value(
                 let point_count = u32(tex.data0.x);
                 let scale = tex.data0.y;
 
-                return vec3(0.5, 0.5, 0.5) * (1.0 + sin(scale * p.z + 10.0 * noise_turb(tex.start, point_count, p, 7u)));
+                return vec3(0.5) * (1.0 + sin(scale * p.z + 10.0 * noise_turb(tex.start, point_count, p, 7u)));
             }
             default: {
-                return vec3(0.0, 0.0, 0.0);
+                return vec3(0.0);
             }
         }
     }
 
-    return vec3(0.0, 0.0, 0.0);
+    return vec3(0.0);
 }
 
 fn noise(tex_start: u32, point_count: u32, p: vec3<f32>) -> f32 {

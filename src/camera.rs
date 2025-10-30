@@ -4,6 +4,8 @@ use winit::{
 };
 use cgmath::{Vector3, prelude::*, vec3};
 
+use crate::utils::*;
+
 pub struct Camera {
     pub image_width: u32,
     pub image_height: u32,
@@ -11,11 +13,12 @@ pub struct Camera {
     pub max_depth: u32,
     pub samples_per_frame: u32,
     pub vfov: f32,
-    pub lookfrom: Vector3<f32>,
-    pub lookat: Vector3<f32>,
-    pub vup: Vector3<f32>,
+    pub lookfrom: Vec3,
+    pub lookat: Vec3,
+    pub vup: Vec3,
     pub defocus_angle: f32,
     pub focus_dist: f32,
+    pub background: Vec3,
 }
 impl Camera {
     pub fn to_raw(&self) -> CameraUniforms {
@@ -54,6 +57,7 @@ impl Camera {
             pixel00_loc: [pixel00_loc.x, pixel00_loc.y, pixel00_loc.z, 0.0],
             defocus_disk_u: [defocus_disk_u.x, defocus_disk_u.y, defocus_disk_u.z, 0.0],
             defocus_disk_v: [defocus_disk_v.x, defocus_disk_v.y, defocus_disk_v.z, 0.0],
+            background: [self.background.x, self.background.y, self.background.z, 0.0],
         }
     }
 }
@@ -75,4 +79,5 @@ pub struct CameraUniforms {
     pub pixel00_loc: [f32; 4],
     pub defocus_disk_u: [f32; 4],
     pub defocus_disk_v: [f32; 4],
+    pub background: [f32; 4],
 }

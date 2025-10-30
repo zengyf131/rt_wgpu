@@ -24,6 +24,7 @@ pub fn get_world_0() -> (Camera, Box<dyn Primitive>) {
         vup: vec3(0.0, 1.0, 0.0),
         defocus_angle: 0.0,
         focus_dist: 3.4,
+        background: vec3(0.7, 0.8, 1.0),
     };
 
     let mut world = PrimitiveList::new();
@@ -57,6 +58,7 @@ pub fn bouncing_spheres() -> (Camera, Box<dyn Primitive>) {
         vup: vec3(0.0, 1.0, 0.0),
         defocus_angle: 0.6,
         focus_dist: 10.0,
+        background: vec3(0.7, 0.8, 1.0),
     };
 
     let mut world = PrimitiveList::new();
@@ -133,6 +135,7 @@ pub fn earth() -> (Camera, Box<dyn Primitive>) {
         vup: vec3(0.0, 1.0, 0.0),
         defocus_angle: 0.0,
         focus_dist: 10.0,
+        background: vec3(0.7, 0.8, 1.0),
     };
 
     let earth_texture = Rc::new(RefCell::new(ImageTexture::from_bytes(include_bytes!("earthmap.jpg"))));
@@ -156,6 +159,7 @@ pub fn perlin_spheres() -> (Camera, Box<dyn Primitive>) {
         vup: vec3(0.0, 1.0, 0.0),
         defocus_angle: 0.0,
         focus_dist: 10.0,
+        background: vec3(0.7, 0.8, 1.0),
     };
 
     let mut world = Box::new(PrimitiveList::new());
@@ -181,6 +185,7 @@ pub fn quads() -> (Camera, Box<dyn Primitive>) {
         vup: vec3(0.0, 1.0, 0.0),
         defocus_angle: 0.0,
         focus_dist: 10.0,
+        background: vec3(0.7, 0.8, 1.0),
     };
 
     let mut world = Box::new(PrimitiveList::new());
@@ -198,6 +203,70 @@ pub fn quads() -> (Camera, Box<dyn Primitive>) {
     world.add(Box::new(Quad::new(vec3( 3.0,-2.0, 1.0), vec3(0.0, 0.0, 4.0), vec3(0.0, 4.0, 0.0), right_blue)));
     world.add(Box::new(Quad::new(vec3(-2.0, 3.0, 1.0), vec3(4.0, 0.0, 0.0), vec3(0.0, 0.0, 4.0), upper_orange)));
     world.add(Box::new(Quad::new(vec3(-2.0,-3.0, 5.0), vec3(4.0, 0.0, 0.0), vec3(0.0, 0.0,-4.0), lower_teal)));
+
+    (camera, world)
+}
+
+pub fn simple_light() -> (Camera, Box<dyn Primitive>) {
+
+    let camera = Camera {
+        image_width: 1920,
+        image_height: 1080,
+        samples_per_pixel: 100,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 20.0,
+        lookfrom: vec3(26.0, 3.0, 6.0),
+        lookat: vec3(0.0, 2.0, 0.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = Box::new(PrimitiveList::new());
+
+    let pertext = Rc::new(RefCell::new(NoiseTexture::new(4.0)));
+    world.add(Box::new(Sphere::sphere(vec3(0.0,-1000.0,0.0), 1000.0, Rc::new(RefCell::new(Lambertian::new(pertext.clone()))))));
+    world.add(Box::new(Sphere::sphere(vec3(0.0,2.0,0.0), 2.0, Rc::new(RefCell::new(Lambertian::new(pertext))))));
+
+    let difflight = Rc::new(RefCell::new(DiffuseLight::from_color(vec3(4.0,4.0,4.0))));
+    world.add(Box::new(Sphere::sphere(vec3(0.0, 7.0, 0.0), 2.0, difflight.clone())));
+    world.add(Box::new(Quad::new(vec3(3.0,1.0,-2.0), vec3(2.0,0.0,0.0), vec3(0.0,2.0,0.0), difflight)));
+
+    (camera, world)
+}
+
+pub fn cornell_box() -> (Camera, Box<dyn Primitive>) {
+
+    let camera = Camera {
+        image_width: 1080,
+        image_height: 1080,
+        samples_per_pixel: 200,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 40.0,
+        lookfrom: vec3(278.0, 278.0, -800.0),
+        lookat: vec3(278.0, 278.0, 0.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = Box::new(PrimitiveList::new());
+
+    let red   = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.65, 0.05, 0.05))));
+    let white = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.73, 0.73, 0.73))));
+    let green = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.12, 0.45, 0.15))));
+    let light = Rc::new(RefCell::new(DiffuseLight::from_color(vec3(15.0, 15.0, 15.0))));
+
+    world.add(Box::new(Quad::new(vec3(555.0,0.0,0.0), vec3(0.0,555.0,0.0), vec3(0.0,0.0,555.0), green)));
+    world.add(Box::new(Quad::new(vec3(0.0,0.0,0.0), vec3(0.0,555.0,0.0), vec3(0.0,0.0,555.0), red)));
+    world.add(Box::new(Quad::new(vec3(343.0, 554.0, 332.0), vec3(-130.0,0.0,0.0), vec3(0.0,0.0,-105.0), light)));
+    world.add(Box::new(Quad::new(vec3(0.0,0.0,0.0), vec3(555.0,0.0,0.0), vec3(0.0,0.0,555.0), white.clone())));
+    world.add(Box::new(Quad::new(vec3(555.0,555.0,555.0), vec3(-555.0,0.0,0.0), vec3(0.0,0.0,-555.0), white.clone())));
+    world.add(Box::new(Quad::new(vec3(0.0,0.0,555.0), vec3(555.0,0.0,0.0), vec3(0.0,555.0,0.0), white)));
 
     (camera, world)
 }
