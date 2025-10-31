@@ -2,9 +2,10 @@ use std::{rc::Rc, cell::RefCell};
 
 use cgmath::Bounded;
 
-use crate::material::Material;
+use crate::material::{Material, Isotropic};
 use crate::structure::*;
 use crate::utils::*;
+use crate::texture::Texture;
 
 pub trait Primitive {
     fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize;
@@ -414,5 +415,63 @@ impl Primitive for RotateY {
 
     fn aabb(&self) -> AABB {
         self.aabb
+    }
+}
+
+pub struct ConstantMedium {
+    boundary: Box<dyn Primitive>,
+    neg_inv_density: f32,
+    phase_function: Rc<RefCell<dyn Material>>,
+}
+impl ConstantMedium {
+    pub fn new(boundary: Box<dyn Primitive>, density: f32, tex: Rc<RefCell<dyn Texture>>) -> Self {
+        Self {
+            boundary,
+            neg_inv_density: -1.0 / density,
+            phase_function: Rc::new(RefCell::new(Isotropic::new(tex))),
+        }
+    }
+
+    pub fn from_color(boundary: Box<dyn Primitive>, density: f32, albedo: Vec3) -> Self {
+        Self {
+            boundary,
+            neg_inv_density: -1.0 / density,
+            phase_function: Rc::new(RefCell::new(Isotropic::from_color(albedo))),
+        }
+    }
+}
+impl Primitive for ConstantMedium {
+    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+        if self.phase_function.borrow().mat_id() < 0 {
+            let _ = self.phase_function.borrow_mut().to_raw(raw_vec);
+        }
+
+        let this_pid = raw_vec.primitives.len();
+        let this_raw = PrimitiveRaw {
+            type_id: 5,
+            mat_id: self.phase_function.borrow().mat_id(),
+            left_child_id: -1,
+            right_child_id: -1,
+            next_elem_id: -1,
+            aabb: self.aabb(),
+            _pad: [0; 1],
+
+            data0: [self.neg_inv_density, 0.0, 0.0, 0.0],
+            data1: [0.0; 4],
+            data2: [0.0; 4],
+            data3: [0.0; 4],
+            data4: [0.0; 4],
+        };
+        raw_vec.primitives.push(this_raw);
+
+        let child_pid = self.boundary.to_raw(raw_vec);
+
+        raw_vec.primitives[this_pid].right_child_id = child_pid as i32;
+
+        return this_pid;
+    }
+
+    fn aabb(&self) -> AABB {
+        self.boundary.aabb()
     }
 }

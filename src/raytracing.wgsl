@@ -107,9 +107,9 @@ fn camera_ray_color(primary_ray: Ray, rng_state: ptr<function, u32>) -> vec3<f32
     for (var depth = 0u; depth < camera.max_depth; depth += 1u) {
         var hit = false;
         if scene_metadata.use_bvh == 1u {
-            hit = primitive_hit(scene_metadata.root_id, r, Interval(0.001, INF), &rec);
+            hit = primitive_hit(scene_metadata.root_id, r, Interval(0.001, INF), &rec, rng_state);
         } else {
-            hit = primitive_hit_list(r, Interval(0.001, INF), &rec);
+            hit = primitive_hit_list(r, Interval(0.001, INF), &rec, rng_state);
         }
         if hit {
             var scattered = ray_new();
@@ -289,26 +289,39 @@ struct Primitive {
 struct HitStackEntry {
     pid: u32,
     stage: u32,
-    hit: bool,
-    report_index: i32,
+
+    // Current status
+    cur_r: Ray,
+    cur_ray_t: Interval,
+    cur_rec: HitRecord,
+    cur_hit: bool,
+
+    // Local variable
+    rec1: HitRecord,
+
+    // Return value
+//     return_index: i32,
+//     hit: bool,
+//     rec1: HitRecord,
 }
 
-fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitRecord>) -> bool {
+fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, _rec: ptr<function, HitRecord>, rng_state: ptr<function, u32>) -> bool {
     var stack: array<HitStackEntry, 32>;
     var stack_top = 1u;
-    var hit = false;
     var r = _r;
     var ray_t = _ray_t;
+    var hit = false;
+    var rec = (*_rec);
 
-    stack[0] = HitStackEntry(pid, 0u, false, -1);
+    stack[0] = HitStackEntry(pid, 0u, r, ray_t, rec, hit, hit_record_new());
 
     while (stack_top > 0u) {
         stack_top -= 1u;
         var this_entry = stack[stack_top];
         let p = primitive_list[this_entry.pid];
 
-        if p.next_elem_id >= 0 {
-            stack[stack_top] = HitStackEntry(u32(p.next_elem_id), 0u, false, this_entry.report_index);
+        if this_entry.stage == 0u && p.next_elem_id >= 0 {
+            stack[stack_top] = HitStackEntry(u32(p.next_elem_id), 0u, r, ray_t, rec, hit, hit_record_new());
             stack_top += 1u;
         }
 
@@ -319,11 +332,11 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitReco
                 }
 
                 if p.right_id >= 0 {
-                    stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, false, this_entry.report_index);
+                    stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, r, ray_t, rec, hit, hit_record_new());
                     stack_top += 1u;
                 }
                 if p.left_id >= 0 {
-                    stack[stack_top] = HitStackEntry(u32(p.left_id), 0u, false, this_entry.report_index);
+                    stack[stack_top] = HitStackEntry(u32(p.left_id), 0u, r, ray_t, rec, hit, hit_record_new());
                     stack_top += 1u;
                 }
             }
@@ -353,17 +366,15 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitReco
                     }
                 }
 
-                (*rec).t = root;
-                (*rec).p = ray_at(r, (*rec).t);
-                let outward_normal = ((*rec).p - current_center) / radius;
-                hit_record_set_face_normal(rec, r, outward_normal);
-                (*rec).uv = get_sphere_uv(outward_normal);
-                (*rec).mat_id = u32(p.mat_id);
+                rec.t = root;
+                rec.p = ray_at(r, rec.t);
+                let outward_normal = (rec.p - current_center) / radius;
+                hit_record_set_face_normal(&rec, r, outward_normal);
+                rec.uv = get_sphere_uv(outward_normal);
+                rec.mat_id = u32(p.mat_id);
 
                 hit = true;
-                this_entry.hit = true;
                 ray_t = Interval(ray_t.min, root);
-                
             }
             case 2u: { // quad
                 let q = p.data0.xyz;
@@ -387,14 +398,13 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitReco
                 let unit_interval = Interval(0.0, 1.0);
                 if !interval_contains(unit_interval, alpha) || !interval_contains(unit_interval, beta) { continue; }
 
-                (*rec).t = t;
-                (*rec).p = intersection;
-                (*rec).mat_id = u32(p.mat_id);
-                hit_record_set_face_normal(rec, r, normal);
-                (*rec).uv = vec2(alpha, beta);
+                rec.t = t;
+                rec.p = intersection;
+                rec.mat_id = u32(p.mat_id);
+                hit_record_set_face_normal(&rec, r, normal);
+                rec.uv = vec2(alpha, beta);
 
                 hit = true;
-                this_entry.hit = true;
                 ray_t = Interval(ray_t.min, t);
             }
             case 3u: { // translate
@@ -402,16 +412,22 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitReco
 
                 switch this_entry.stage {
                     case 0u: {
+                        stack[stack_top] = HitStackEntry(this_entry.pid, 1u, r, ray_t, rec, hit, hit_record_new());
+                        stack_top += 1u;
+
                         r.orig -= offset;
-                        stack[stack_top] = HitStackEntry(this_entry.pid, 1u, false, this_entry.report_index);
-                        stack[stack_top + 1u] = HitStackEntry(u32(p.right_id), 0u, false, i32(stack_top));
-                        stack_top += 2u;
+                        hit = false;
+                        stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, r, ray_t, rec, hit, hit_record_new());
+                        stack_top += 1u;
                     }
                     case 1u: {
-                        r.orig += offset;
-
-                        if this_entry.hit {
-                            (*rec).p += offset;
+                        if hit {
+                            rec.p += offset;
+                            r = this_entry.cur_r;
+                            hit = true;
+                        } else {
+                            r = this_entry.cur_r;
+                            hit = this_entry.cur_hit;
                         }
                     }
                     default: {}
@@ -423,6 +439,9 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitReco
 
                 switch this_entry.stage {
                     case 0u: {
+                        stack[stack_top] = HitStackEntry(this_entry.pid, 1u, r, ray_t, rec, hit, hit_record_new());
+                        stack_top += 1u;
+
                         let origin = vec3(
                             cos_theta * r.orig.x - sin_theta * r.orig.z,
                             r.orig.y,
@@ -434,35 +453,102 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitReco
                             sin_theta * r.dir.x + cos_theta * r.dir.z,
                         );
                         r = Ray(origin, direction, r.tm);
+                        hit = false;
 
-                        stack[stack_top] = HitStackEntry(this_entry.pid, 1u, false, this_entry.report_index);
-                        stack[stack_top + 1u] = HitStackEntry(u32(p.right_id), 0u, false, i32(stack_top));
-                        stack_top += 2u;
+                        stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, r, ray_t, rec, hit, hit_record_new());
+                        stack_top += 1u;
                     }
                     case 1u: {
-                        let origin = vec3(
-                            cos_theta * r.orig.x + sin_theta * r.orig.z,
-                            r.orig.y,
-                            -sin_theta * r.orig.x + cos_theta * r.orig.z,
-                        );
-                        let direction = vec3(
-                            cos_theta * r.dir.x + sin_theta * r.dir.z,
-                            r.dir.y,
-                            -sin_theta * r.dir.x + cos_theta * r.dir.z,
-                        );
-                        r = Ray(origin, direction, r.tm);
+                        if hit {
+                            rec.p = vec3(
+                                cos_theta * rec.p.x + sin_theta * rec.p.z,
+                                rec.p.y,
+                                -sin_theta * rec.p.x + cos_theta * rec.p.z,
+                            );
+                            rec.normal = vec3(
+                                cos_theta * rec.normal.x + sin_theta * rec.normal.z,
+                                rec.normal.y,
+                                -sin_theta * rec.normal.x + cos_theta * rec.normal.z,
+                            );
+                            r = this_entry.cur_r;
+                            hit = true;
+                        } else {
+                            r = this_entry.cur_r;
+                            hit = this_entry.cur_hit;
+                        }
+                    }
+                    default: {}
+                }
+            }
+            case 5u: { // constant medium
+                let neg_inv_density = p.data0.x;
 
-                        if this_entry.hit {
-                            (*rec).p = vec3(
-                                cos_theta * (*rec).p.x + sin_theta * (*rec).p.z,
-                                (*rec).p.y,
-                                -sin_theta * (*rec).p.x + cos_theta * (*rec).p.z,
+                switch this_entry.stage {
+                    case 0u: {
+                        stack[stack_top] = HitStackEntry(this_entry.pid, 1u, r, ray_t, rec, hit, hit_record_new());
+                        stack_top += 1u;
+
+                        ray_t = Interval(-INF, INF);
+                        rec = hit_record_new();
+
+                        stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, r, ray_t, rec, hit, hit_record_new());
+                        stack_top += 1u;
+                    }
+                    case 1u: {
+                        if hit {
+                            stack[stack_top] = HitStackEntry(
+                                this_entry.pid,
+                                2u,
+                                this_entry.cur_r,
+                                this_entry.cur_ray_t,
+                                this_entry.cur_rec,
+                                this_entry.cur_hit,
+                                rec,
                             );
-                            (*rec).normal = vec3(
-                                cos_theta * (*rec).normal.x + sin_theta * (*rec).normal.z,
-                                (*rec).normal.y,
-                                -sin_theta * (*rec).normal.x + cos_theta * (*rec).normal.z,
-                            );
+                            stack_top += 1u;
+
+                            ray_t = Interval(rec.t + 0.0001, INF);
+                            rec = hit_record_new();
+
+                            stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, r, ray_t, rec, hit, hit_record_new());
+                            stack_top += 1u;
+                        } else {
+                            ray_t = this_entry.cur_ray_t;
+                            rec = this_entry.cur_rec;
+                            hit = this_entry.cur_hit;
+                        }
+                    }
+                    case 2u: {
+                        var this_hit = false;
+                        if hit {
+                            var rec1 = this_entry.rec1;
+                            var rec2 = rec;
+                            if rec1.t < ray_t.min { rec1.t = ray_t.min; }
+                            if rec2.t > ray_t.max { rec2.t = ray_t.max; }
+                            if rec1.t < rec2.t {
+                                if rec1.t < 0.0 { rec1.t = 0.0; }
+                                let ray_length = length(r.dir);
+                                let distance_inside_boundary = (rec2.t - rec1.t) * ray_length;
+                                let hit_distance = neg_inv_density * log(random_f32(rng_state));
+
+                                if hit_distance <= distance_inside_boundary {
+                                    rec.t = rec1.t + hit_distance / ray_length;
+                                    rec.p = ray_at(r, rec.t);
+                                    rec.normal = vec3(1.0, 0.0, 0.0);
+                                    rec.front_face = true;
+                                    rec.mat_id = u32(p.mat_id);
+                                    this_hit = true;
+                                }
+                            }
+                        }
+
+                        if this_hit {
+                            ray_t = this_entry.cur_ray_t;
+                            hit = true;
+                        } else {
+                            ray_t = this_entry.cur_ray_t;
+                            rec = this_entry.cur_rec;
+                            hit = this_entry.cur_hit;
                         }
                     }
                     default: {}
@@ -470,21 +556,18 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, rec: ptr<function, HitReco
             }
             default: {}
         }
-
-        if this_entry.hit && this_entry.report_index >= 0 {
-            stack[u32(this_entry.report_index)].hit = true;
-        }
     }
 
+    (*_rec) = rec;
     return hit;
 }
 
-fn primitive_hit_list(r: Ray, ray_t: Interval, rec: ptr<function, HitRecord>) -> bool {
+fn primitive_hit_list(r: Ray, ray_t: Interval, rec: ptr<function, HitRecord>, rng_state: ptr<function, u32>) -> bool {
     var temp_rec = hit_record_new();
     var hit_anything = false;
     var closest_so_far = ray_t.max;
     for (var i = 0u; i < arrayLength(&primitive_list); i = i + 1u) {
-        let hit = primitive_hit(i , r, Interval(ray_t.min, closest_so_far), &temp_rec);
+        let hit = primitive_hit(i , r, Interval(ray_t.min, closest_so_far), &temp_rec, rng_state);
         if hit {
             hit_anything = true;
             closest_so_far = temp_rec.t;
@@ -567,6 +650,11 @@ fn material_scatter(
         }
         case 3u: { // diffuse light
             return false;
+        }
+        case 4u: { // isotropic
+            (*scattered) = Ray(rec.p, random_vec3(rng_state), r_in.tm);
+            (*attenuation) = texture_value(u32(mat.tex_id), rec.uv, rec.p);
+            return true;
         }
         default: {
             return false;

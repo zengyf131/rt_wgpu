@@ -281,6 +281,51 @@ pub fn cornell_box() -> (Camera, Box<dyn Primitive>) {
     (camera, world)
 }
 
+pub fn cornell_smoke() -> (Camera, Box<dyn Primitive>) {
+
+    let camera = Camera {
+        image_width: 600,
+        image_height: 600,
+        samples_per_pixel: 200,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 40.0,
+        lookfrom: vec3(278.0, 278.0, -800.0),
+        lookat: vec3(278.0, 278.0, 0.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = Box::new(PrimitiveList::new());
+
+    let red   = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.65, 0.05, 0.05))));
+    let white = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.73, 0.73, 0.73))));
+    let green = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.12, 0.45, 0.15))));
+    let light = Rc::new(RefCell::new(DiffuseLight::from_color(vec3(7.0, 7.0, 7.0))));
+
+    world.add(Box::new(Quad::new(vec3(555.0,0.0,0.0), vec3(0.0,555.0,0.0), vec3(0.0,0.0,555.0), green)));
+    world.add(Box::new(Quad::new(vec3(0.0,0.0,0.0), vec3(0.0,555.0,0.0), vec3(0.0,0.0,555.0), red)));
+    world.add(Box::new(Quad::new(vec3(113.0, 554.0, 127.0), vec3(330.0,0.0,0.0), vec3(0.0,0.0,305.0), light)));
+    world.add(Box::new(Quad::new(vec3(0.0,0.0,0.0), vec3(555.0,0.0,0.0), vec3(0.0,0.0,555.0), white.clone())));
+    world.add(Box::new(Quad::new(vec3(555.0,555.0,555.0), vec3(-555.0,0.0,0.0), vec3(0.0,0.0,-555.0), white.clone())));
+    world.add(Box::new(Quad::new(vec3(0.0,0.0,555.0), vec3(555.0,0.0,0.0), vec3(0.0,555.0,0.0), white.clone())));
+
+    let box1 = quad_box(vec3(0.0, 0.0, 0.0), vec3(165.0, 330.0, 165.0), white.clone());
+    let box1 = Box::new(RotateY::new(box1, degrees(15.0)));
+    let box1 = Box::new(Translate::new(box1, vec3(265.0, 0.0, 295.0)));
+
+    let box2 = quad_box(vec3(0.0, 0.0, 0.0), vec3(165.0, 165.0, 165.0), white);
+    let box2 = Box::new(RotateY::new(box2, degrees(-18.0)));
+    let box2 = Box::new(Translate::new(box2, vec3(130.0, 0.0, 65.0)));
+
+    world.add(Box::new(ConstantMedium::from_color(box1, 0.01, vec3(0.0, 0.0, 0.0))));
+    world.add(Box::new(ConstantMedium::from_color(box2, 0.01, vec3(1.0, 1.0, 1.0))));
+
+    (camera, world)
+}
+
 // Returns the 3D box (six sides) that contains the two opposite vertices a & b.
 fn quad_box(a: Vec3, b: Vec3, mat: Rc<RefCell<dyn Material>>) -> Box<PrimitiveList> {
     let mut sides = Box::new(PrimitiveList::new());

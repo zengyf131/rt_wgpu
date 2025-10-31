@@ -156,3 +156,45 @@ impl Material for DiffuseLight {
         self.mat_id
     }
 }
+
+pub struct Isotropic {
+    mat_id: i32,
+    tex: Rc<RefCell<dyn Texture>>,
+}
+impl Isotropic {
+    pub fn new(tex: Rc<RefCell<dyn Texture>>) -> Self {
+        Self {
+            mat_id: -1,
+            tex,
+        }
+    }
+
+    pub fn from_color(albedo: Vec3) -> Self {
+        Self {
+            mat_id: -1,
+            tex: Rc::new(RefCell::new(SolidColor::new(albedo))),
+        }
+    }
+}
+impl Material for Isotropic {
+    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+        if self.tex.borrow().tex_id() < 0 {
+            self.tex.borrow_mut().to_raw(raw_vec);
+        }
+
+        let this_raw = MaterialRaw {
+            type_id: 4,
+            tex_id: self.tex.borrow().tex_id(),
+            _pad0: [0; 2],
+            data0: [0.0; 4],
+        };
+
+        self.mat_id = raw_vec.materials.len() as i32;
+        raw_vec.materials.push(this_raw);
+        return raw_vec.materials.len() - 1;
+    }
+
+    fn mat_id(&self) -> i32 {
+        self.mat_id
+    }
+}
