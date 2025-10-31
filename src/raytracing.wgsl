@@ -490,6 +490,7 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, _rec: ptr<function, HitRec
 
                         ray_t = Interval(-INF, INF);
                         rec = hit_record_new();
+                        hit = false;
 
                         stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, r, ray_t, rec, hit, hit_record_new());
                         stack_top += 1u;
@@ -509,6 +510,7 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, _rec: ptr<function, HitRec
 
                             ray_t = Interval(rec.t + 0.0001, INF);
                             rec = hit_record_new();
+                            hit = false;
 
                             stack[stack_top] = HitStackEntry(u32(p.right_id), 0u, r, ray_t, rec, hit, hit_record_new());
                             stack_top += 1u;
@@ -523,8 +525,8 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, _rec: ptr<function, HitRec
                         if hit {
                             var rec1 = this_entry.rec1;
                             var rec2 = rec;
-                            if rec1.t < ray_t.min { rec1.t = ray_t.min; }
-                            if rec2.t > ray_t.max { rec2.t = ray_t.max; }
+                            if rec1.t < this_entry.cur_ray_t.min { rec1.t = this_entry.cur_ray_t.min; }
+                            if rec2.t > this_entry.cur_ray_t.max { rec2.t = this_entry.cur_ray_t.max; }
                             if rec1.t < rec2.t {
                                 if rec1.t < 0.0 { rec1.t = 0.0; }
                                 let ray_length = length(r.dir);
@@ -543,7 +545,7 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, _rec: ptr<function, HitRec
                         }
 
                         if this_hit {
-                            ray_t = this_entry.cur_ray_t;
+                            ray_t = Interval(this_entry.cur_ray_t.min, rec.t);
                             hit = true;
                         } else {
                             ray_t = this_entry.cur_ray_t;
