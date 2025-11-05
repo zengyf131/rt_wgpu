@@ -50,6 +50,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 struct SceneMetadata {
     root_id: u32,
     use_bvh: u32,
+    // light_id: u32,
 }
 
 // Camera
@@ -114,11 +115,19 @@ fn camera_ray_color(primary_ray: Ray, rng_state: ptr<function, u32>) -> vec3<f32
         if hit {
             var scattered = ray_new();
             var b_att = vec3(0.0);
-            let b_emit = material_emitted(rec.mat_id, rec.uv, rec.p);
-            if material_scatter(rec.mat_id, r, rec, &b_att, &scattered, rng_state) {
+            var pdf_value = 0.0;
+            let b_emit = material_emitted(rec.mat_id, rec, rec.uv, rec.p);
+            if material_scatter(rec.mat_id, r, rec, &b_att, &scattered, &pdf_value, rng_state) {
+                // Light importance sampling
+                // scattered = Ray(rec.p, primitive_random(scene_metadata.light_id, rec.p, rng_state), r.tm);
+                // pdf_value = primitive_pdf_value(scene_metadata.light_id, rec.p, scattered.dir, rng_state);
+
+                let scattering_pdf = material_scatter_pdf(rec.mat_id, r, rec, scattered);
+                pdf_value = scattering_pdf;
+
                 r = scattered;
                 emission += attenuation * b_emit;
-                attenuation *= b_att;
+                attenuation *= b_att * scattering_pdf / pdf_value;
             } else {
                 emission += attenuation * b_emit;
                 break;
@@ -148,7 +157,7 @@ fn camera_get_ray(pixel_loc: vec2<f32>, rng_state: ptr<function, u32>) -> Ray {
 }
 
 fn camera_defocus_disk_sample(rng_state: ptr<function, u32>) -> vec3<f32> {
-    let p = random_vec3_unit_disk(rng_state);
+    let p = random_vec3_in_unit_disk(rng_state);
     return camera.center + (p.x * camera.defocus_disk_u) + (p.y * camera.defocus_disk_v);
 }
 
@@ -564,6 +573,39 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, _rec: ptr<function, HitRec
     return hit;
 }
 
+fn primitive_pdf_value(pid: u32, origin: vec3<f32>, direction: vec3<f32>, rng_state: ptr<function, u32>) -> f32 {
+    let prim = primitive_list[pid];
+    switch prim.type_id {
+        case 2u: { // quad
+            let area = prim.data4.w;
+
+            var rec = hit_record_new();
+            if !primitive_hit(pid, Ray(origin, direction, 0.0), Interval(0.001, INF), &rec, rng_state) {
+                return 0.0;
+            }
+            let distance_squared = rec.t * rec.t * dot(direction, direction);
+            let cosine = abs(dot(direction, rec.normal) / length(direction));
+            return distance_squared / (cosine * area);
+        }
+        default: { return 0.0; }
+    }
+}
+
+fn primitive_random(pid: u32, origin: vec3<f32>, rng_state: ptr<function, u32>) -> vec3<f32> {
+    let prim = primitive_list[pid];
+    switch prim.type_id {
+        case 2u: { // quad
+            let q = prim.data0.xyz;
+            let u = prim.data1.xyz;
+            let v = prim.data2.xyz;
+
+            let p = q + (random_f32(rng_state) * u) + (random_f32(rng_state) * v);
+            return p - origin;
+        }
+        default: { return vec3(0.0); }
+    }
+}
+
 fn primitive_hit_list(r: Ray, ray_t: Interval, rec: ptr<function, HitRecord>, rng_state: ptr<function, u32>) -> bool {
     var temp_rec = hit_record_new();
     var hit_anything = false;
@@ -585,7 +627,7 @@ fn get_sphere_uv(p: vec3<f32>) -> vec2<f32> {
     let phi = atan2(-p.z, p.x) + PI;
 
     return vec2(
-        phi / (2 * PI),
+        phi / (2.0 * PI),
         theta / PI,
     );
 }
@@ -603,18 +645,18 @@ fn material_scatter(
     rec: HitRecord,
     attenuation: ptr<function, vec3<f32>>,
     scattered: ptr<function, Ray>,
+    pdf: ptr<function, f32>,
     rng_state: ptr<function, u32>,
 ) -> bool {
     let mat = material_list[mat_id];
     switch mat.type_id {
         case 0u: { // lambertian
-            var scatter_direction = rec.normal + random_vec3(rng_state);
-            if vec3_near_zero(scatter_direction) {
-                scatter_direction = rec.normal;
-            }
+            let uvw = onb_new(rec.normal);
+            var scatter_direction = normalize(onb_transform(uvw, random_cosine_direction(rng_state)));
 
             (*scattered) = Ray(rec.p, scatter_direction, r_in.tm);
             (*attenuation) = texture_value(u32(mat.tex_id), rec.uv, rec.p);
+            (*pdf) = dot(uvw.w, scatter_direction) / PI;
             return true;
         }
         case 1u: { // metal
@@ -622,7 +664,7 @@ fn material_scatter(
             let fuzz = mat.data0.w;
 
             var reflected = reflect(r_in.dir, rec.normal);
-            reflected = normalize(reflected) + (fuzz * random_vec3(rng_state));
+            reflected = normalize(reflected) + (fuzz * random_vec3_unit(rng_state));
 
             (*scattered) = Ray(rec.p, reflected, r_in.tm);
             (*attenuation) = albedo;
@@ -654,8 +696,9 @@ fn material_scatter(
             return false;
         }
         case 4u: { // isotropic
-            (*scattered) = Ray(rec.p, random_vec3(rng_state), r_in.tm);
+            (*scattered) = Ray(rec.p, random_vec3_unit(rng_state), r_in.tm);
             (*attenuation) = texture_value(u32(mat.tex_id), rec.uv, rec.p);
+            (*pdf) = 1.0 / (4.0 * PI);
             return true;
         }
         default: {
@@ -664,14 +707,41 @@ fn material_scatter(
     }
 }
 
+fn material_scatter_pdf(
+    mat_id: u32,
+    r_in: Ray,
+    rec: HitRecord,
+    scattered: Ray,
+) -> f32 {
+    let mat = material_list[mat_id];
+    switch mat.type_id {
+        case 0u: { // Lambertian
+            let cos_theta = dot(rec.normal, normalize(scattered.dir));
+            if cos_theta < 0.0 {
+                return 0.0;
+            } else {
+                return cos_theta / PI;
+            }
+        }
+        case 4u: { // isotropic
+            return 1.0 / (4.0 * PI);
+        }
+        default: { return 0.0; }
+    }
+}
+
 fn material_emitted(
     mat_id: u32,
+    rec: HitRecord,
     uv: vec2<f32>,
     p: vec3<f32>,
 ) -> vec3<f32> {
     let mat = material_list[mat_id];
     switch mat.type_id {
         case 3u: { // diffuse light
+            if !rec.front_face {
+                return vec3(0.0);
+            }
             return texture_value(u32(mat.tex_id), uv, p);
         }
         default: {
@@ -801,6 +871,27 @@ fn noise_turb(tex_start: u32, point_count: u32, p: vec3<f32>, depth: u32) -> f32
     return abs(accum);
 }
 
+struct ONB {
+    u: vec3<f32>,
+    v: vec3<f32>,
+    w: vec3<f32>,
+}
+
+fn onb_new(n: vec3<f32>) -> ONB {
+    let w = normalize(n);
+    var a = vec3(1.0, 0.0, 0.0);
+    if abs(w.x) > 0.9 {
+        a = vec3(0.0, 1.0, 0.0);
+    }
+    let v = normalize(cross(w, a));
+    let u = cross(w, v);
+    return ONB(u, v, w);
+}
+
+fn onb_transform(onb: ONB, v: vec3<f32>) -> vec3<f32> {
+    return (v.x * onb.u) + (v.y * onb.v) + (v.z * onb.w);
+}
+
 // Utils
 const INF: f32 = 3.402823e38;
 const PI: f32 = 3.141592653589793;
@@ -898,22 +989,20 @@ fn sample_square(state: ptr<function, u32>) -> vec2<f32> {
     return vec2(x, y);
 }
 
-fn random_vec3(state: ptr<function, u32>) -> vec3<f32> {
-    // r^3 ~ U(0, 1)
-    let r = pow(random_f32(state), 0.33333f);
+fn random_vec3_unit(state: ptr<function, u32>) -> vec3<f32> {
     let cosTheta = 1f - 2f * random_f32(state);
     let sinTheta = sqrt(1f - cosTheta * cosTheta);
     let phi = 2f * PI * random_f32(state);
 
-    let x = r * sinTheta * cos(phi);
-    let y = r * sinTheta * sin(phi);
+    let x = sinTheta * cos(phi);
+    let y = sinTheta * sin(phi);
     let z = cosTheta;
 
     return vec3(x, y, z);
 }
 
-fn random_vec3_hemisphere(state: ptr<function, u32>, normal: vec3<f32>) -> vec3<f32> {
-    let on_unit_sphere = random_vec3(state);
+fn random_vec3_unit_hemisphere(state: ptr<function, u32>, normal: vec3<f32>) -> vec3<f32> {
+    let on_unit_sphere = random_vec3_unit(state);
     if dot(on_unit_sphere, normal) > 0.0 {
         return on_unit_sphere;
     } else {
@@ -921,7 +1010,7 @@ fn random_vec3_hemisphere(state: ptr<function, u32>, normal: vec3<f32>) -> vec3<
     }
 }
 
-fn random_vec3_unit_disk(state: ptr<function, u32>) -> vec3<f32> {
+fn random_vec3_in_unit_disk(state: ptr<function, u32>) -> vec3<f32> {
     // r^2 ~ U(0, 1)
     let r = sqrt(random_f32(state));
     let alpha = 2f * PI * random_f32(state);
@@ -930,4 +1019,15 @@ fn random_vec3_unit_disk(state: ptr<function, u32>) -> vec3<f32> {
     let y = r * sin(alpha);
 
     return vec3(x, y, 0f);
+}
+
+fn random_cosine_direction(state: ptr<function, u32>) -> vec3<f32> {
+    let r1 = random_f32(state);
+    let r2 = random_f32(state);
+    let phi = 2.0 * PI * r1;
+    let x = cos(phi) * sqrt(r2);
+    let y = sin(phi) * sqrt(r2);
+    let z = sqrt(1.0 - r2);
+
+    return vec3(x, y, z);
 }

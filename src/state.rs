@@ -40,7 +40,7 @@ impl State {
     // We don't need this to be async right now,
     // but we will in the next tutorial
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let (camera, world) = final_scene();
+        let (camera, world) = cornell_box();
 
         let image_width = camera.image_width;
         let image_height = camera.image_height;

@@ -239,6 +239,7 @@ pub struct Quad {
     normal: Vec3,
     d: f32,
     w: Vec3,
+    area: f32,
     mat: Rc<RefCell<dyn Material>>,
     aabb: AABB,
 }
@@ -252,6 +253,7 @@ impl Quad {
         let normal = n.normalize();
         let d = dot(normal, q);
         let w = n / dot(n, n);
+        let area = n.magnitude();
 
         Self {
             q,
@@ -260,6 +262,7 @@ impl Quad {
             normal,
             d,
             w,
+            area,
             mat,
             aabb,
         }
@@ -283,7 +286,7 @@ impl Primitive for Quad {
             data1: [self.u.x, self.u.y, self.u.z, 0.0],
             data2: [self.v.x, self.v.y, self.v.z, 0.0],
             data3: [self.normal.x, self.normal.y, self.normal.z, self.d],
-            data4: [self.w.x, self.w.y, self.w.z, 0.0],
+            data4: [self.w.x, self.w.y, self.w.z, self.area],
         };
 
         raw_vec.primitives.push(this_raw);
