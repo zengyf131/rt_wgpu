@@ -1,7 +1,7 @@
-use std::{rc::Rc, cell::RefCell};
+use std::{cell::RefCell, rc::Rc};
 
-use crate::texture::{Texture, SolidColor};
 use crate::structure::*;
+use crate::texture::{SolidColor, Texture};
 use crate::utils::*;
 
 pub trait Material {
@@ -22,10 +22,7 @@ impl Lambertian {
     }
 
     pub fn new(tex: Rc<RefCell<dyn Texture>>) -> Self {
-        Self {
-            mat_id: -1,
-            tex,
-        }
+        Self { mat_id: -1, tex }
     }
 }
 impl Material for Lambertian {
@@ -121,10 +118,7 @@ pub struct DiffuseLight {
 }
 impl DiffuseLight {
     pub fn new(tex: Rc<RefCell<dyn Texture>>) -> Self {
-        Self {
-            mat_id: -1,
-            tex,
-        }
+        Self { mat_id: -1, tex }
     }
 
     pub fn from_color(emit: Vec3) -> Self {
@@ -163,10 +157,7 @@ pub struct Isotropic {
 }
 impl Isotropic {
     pub fn new(tex: Rc<RefCell<dyn Texture>>) -> Self {
-        Self {
-            mat_id: -1,
-            tex,
-        }
+        Self { mat_id: -1, tex }
     }
 
     pub fn from_color(albedo: Vec3) -> Self {

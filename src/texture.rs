@@ -15,10 +15,7 @@ pub struct SolidColor {
 }
 impl SolidColor {
     pub fn new(albedo: Vec3) -> Self {
-        Self {
-            tex_id: -1,
-            albedo,
-        }
+        Self { tex_id: -1, albedo }
     }
 }
 impl Texture for SolidColor {
@@ -29,13 +26,8 @@ impl Texture for SolidColor {
             start: data_start,
             end: data_start,
             _pad0: [0],
-            
-            data0: [
-                self.albedo.x,
-                self.albedo.y,
-                self.albedo.z,
-                0.0,
-            ],
+
+            data0: [self.albedo.x, self.albedo.y, self.albedo.z, 0.0],
         };
 
         self.tex_id = raw_vec.textures.len() as i32;
@@ -116,7 +108,9 @@ impl Texture for ImageTexture {
         let img_h = self.image.dimensions().1;
         let data_start = raw_vec.tex_data.len() as u32;
         let data_end = data_start + 4 * img_w * img_h;
-        raw_vec.tex_data.extend_from_slice(self.image.to_rgba32f().into_raw().as_slice());
+        raw_vec
+            .tex_data
+            .extend_from_slice(self.image.to_rgba32f().into_raw().as_slice());
 
         let this_raw = TextureRaw {
             type_id: 2,
@@ -124,12 +118,7 @@ impl Texture for ImageTexture {
             end: data_end,
             _pad0: [0],
 
-            data0: [
-                img_w as f32,
-                img_h as f32,
-                0.0,
-                0.0,
-            ],
+            data0: [img_w as f32, img_h as f32, 0.0, 0.0],
         };
 
         self.tex_id = raw_vec.textures.len() as i32;
@@ -157,11 +146,15 @@ impl NoiseTexture {
         let mut rng = StdRng::seed_from_u64(0);
         let mut rand_vec: Vec<[f32; 3]> = Vec::with_capacity(Self::POINT_COUNT);
         for i in 0..Self::POINT_COUNT {
-            rand_vec.push(vec3(
-                rng.random_range(-1.0..1.0),
-                rng.random_range(-1.0..1.0),
-                rng.random_range(-1.0..1.0),
-            ).normalize().into());
+            rand_vec.push(
+                vec3(
+                    rng.random_range(-1.0..1.0),
+                    rng.random_range(-1.0..1.0),
+                    rng.random_range(-1.0..1.0),
+                )
+                .normalize()
+                .into(),
+            );
         }
 
         Self {
@@ -197,10 +190,18 @@ impl Texture for NoiseTexture {
     fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
         let data_start = raw_vec.tex_data.len() as u32;
         let data_end = data_start + 6 * Self::POINT_COUNT as u32;
-        raw_vec.tex_data.extend_from_slice(bytemuck::cast_slice(self.rand_vec.as_slice()));
-        raw_vec.tex_data.extend_from_slice(bytemuck::cast_slice(self.perm_x.as_slice()));
-        raw_vec.tex_data.extend_from_slice(bytemuck::cast_slice(self.perm_y.as_slice()));
-        raw_vec.tex_data.extend_from_slice(bytemuck::cast_slice(self.perm_z.as_slice()));
+        raw_vec
+            .tex_data
+            .extend_from_slice(bytemuck::cast_slice(self.rand_vec.as_slice()));
+        raw_vec
+            .tex_data
+            .extend_from_slice(bytemuck::cast_slice(self.perm_x.as_slice()));
+        raw_vec
+            .tex_data
+            .extend_from_slice(bytemuck::cast_slice(self.perm_y.as_slice()));
+        raw_vec
+            .tex_data
+            .extend_from_slice(bytemuck::cast_slice(self.perm_z.as_slice()));
 
         let this_raw = TextureRaw {
             type_id: 3,
@@ -208,12 +209,7 @@ impl Texture for NoiseTexture {
             end: data_end,
             _pad0: [0],
 
-            data0: [
-                Self::POINT_COUNT as f32,
-                self.scale,
-                0.0,
-                0.0,
-            ],
+            data0: [Self::POINT_COUNT as f32, self.scale, 0.0, 0.0],
         };
 
         self.tex_id = raw_vec.textures.len() as i32;

@@ -1,8 +1,8 @@
+use cgmath::{Vector3, prelude::*, vec3};
 use winit::{
     event::*,
     keyboard::{KeyCode, PhysicalKey},
 };
-use cgmath::{Vector3, prelude::*, vec3};
 
 use crate::utils::*;
 
@@ -36,7 +36,8 @@ impl Camera {
         let viewport_v = viewport_height * -v;
         let pixel_delta_u = viewport_u / self.image_width as f32;
         let pixel_delta_v = viewport_v / self.image_height as f32;
-        let viewport_upper_left = center - (self.focus_dist * w) - viewport_u / 2.0 - viewport_v / 2.0;
+        let viewport_upper_left =
+            center - (self.focus_dist * w) - viewport_u / 2.0 - viewport_v / 2.0;
         let pixel00_loc = viewport_upper_left + 0.5 * (pixel_delta_u + pixel_delta_v);
 
         let defocus_radius = self.focus_dist * f32::tan((self.defocus_angle / 2.0).to_radians());

@@ -1,12 +1,12 @@
 use wasm_bindgen::prelude::*;
 
 pub use cgmath::{
-    dot, frustum, ortho, perspective, vec2, vec3, vec4, Deg, Matrix2, Matrix3, Matrix4, Point2,
-    Point3, Quaternion, Rad, Vector2, Vector3, Vector4,
-};
-pub use cgmath::{
     Angle, EuclideanSpace, InnerSpace, Matrix, MetricSpace, One, Rotation, Rotation2, Rotation3,
     SquareMatrix, Transform, Transform2, Transform3, VectorSpace, Zero,
+};
+pub use cgmath::{
+    Deg, Matrix2, Matrix3, Matrix4, Point2, Point3, Quaternion, Rad, Vector2, Vector3, Vector4,
+    dot, frustum, ortho, perspective, vec2, vec3, vec4,
 };
 
 pub type Vec3 = Vector3<f32>;

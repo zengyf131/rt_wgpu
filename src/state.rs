@@ -13,10 +13,10 @@ use winit::{
 
 use crate::camera::Camera;
 use crate::gui::EguiRenderer;
-use crate::structure::*;
-use crate::scene::*;
-use crate::pt::PathTracing;
 use crate::log;
+use crate::pt::PathTracing;
+use crate::scene::*;
+use crate::structure::*;
 
 // This will store the state of our game
 pub struct State {
@@ -155,7 +155,6 @@ impl State {
     pub fn update(&mut self) {}
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
-
         self.window.request_redraw();
 
         // We can't render unless the surface is configured
@@ -172,19 +171,21 @@ impl State {
             .create_command_encoder(&wgpu::CommandEncoderDescriptor {
                 label: Some("Render Encoder"),
             });
-        
-        self.renderer.render(&mut encoder, &self.queue, &view, &mut self.render_data);
+
+        self.renderer
+            .render(&mut encoder, &self.queue, &view, &mut self.render_data);
 
         if self.gui_enable {
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [self.config.width, self.config.height],
-                pixels_per_point: self.window.scale_factor() as f32
-                    * self.config.width as f32 / 1500.0,
+                pixels_per_point: self.window.scale_factor() as f32 * self.config.width as f32
+                    / 1500.0,
             };
 
             self.egui_renderer.begin_frame(self.window.clone());
 
-            self.egui_renderer.render(&mut self.render_data, &self.camera);
+            self.egui_renderer
+                .render(&mut self.render_data, &self.camera);
 
             self.egui_renderer.end_frame_and_draw(
                 &self.device,

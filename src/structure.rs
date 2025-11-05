@@ -9,10 +9,7 @@ impl RenderData {
         let mut timer = Timer::new();
         timer.start();
 
-        Self {
-            frame_id: 0,
-            timer,
-        }
+        Self { frame_id: 0, timer }
     }
 }
 
@@ -89,7 +86,10 @@ impl Interval {
     fn expand(&self, delta: f32) -> Self {
         let padding = delta / 2.0;
 
-        Self { min: self.min - padding, max: self.max - padding }
+        Self {
+            min: self.min - padding,
+            max: self.max - padding,
+        }
     }
 
     fn merge_intervals(a: Self, b: Self) -> Self {

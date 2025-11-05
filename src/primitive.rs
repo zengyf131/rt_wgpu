@@ -1,11 +1,11 @@
-use std::{rc::Rc, cell::RefCell};
+use std::{cell::RefCell, rc::Rc};
 
 use cgmath::Bounded;
 
-use crate::material::{Material, Isotropic};
+use crate::material::{Isotropic, Material};
 use crate::structure::*;
-use crate::utils::*;
 use crate::texture::Texture;
+use crate::utils::*;
 
 pub trait Primitive {
     fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize;
@@ -31,7 +31,12 @@ impl Sphere {
         }
     }
 
-    pub fn sphere_moving(center1: Vec3, center2: Vec3, radius: f32, mat: Rc<RefCell<dyn Material>>) -> Self {
+    pub fn sphere_moving(
+        center1: Vec3,
+        center2: Vec3,
+        radius: f32,
+        mat: Rc<RefCell<dyn Material>>,
+    ) -> Self {
         let rvec = vec3(radius, radius, radius);
         let box1 = AABB::from_points(center1 - rvec, center1 + rvec);
         let box2 = AABB::from_points(center2 - rvec, center2 + rvec);
@@ -172,7 +177,8 @@ impl BVHNode {
                 let b_axis_interval = b.aabb().axis_interval(axis_index);
                 return a_axis_interval.min.total_cmp(&b_axis_interval.min);
             };
-            let comparator = |a: &Box<dyn Primitive>, b: &Box<dyn Primitive>| { box_compare(a, b, axis) };
+            let comparator =
+                |a: &Box<dyn Primitive>, b: &Box<dyn Primitive>| box_compare(a, b, axis);
             prim_vec.sort_by(comparator);
 
             let mid = vec_len / 2;
@@ -181,11 +187,7 @@ impl BVHNode {
             right = Some(Box::new(Self::from_vec(right_vec)));
         }
 
-        Self {
-            left,
-            right,
-            aabb,
-        }
+        Self { left, right, aabb }
     }
 }
 impl Primitive for BVHNode {
@@ -369,7 +371,7 @@ impl RotateY {
                     let tester = vec3(
                         cos_theta * x + sin_theta * z,
                         y,
-                        -sin_theta * x + cos_theta * z
+                        -sin_theta * x + cos_theta * z,
                     );
                     for c in 0..3 {
                         min[c] = min[c].min(tester[c]);

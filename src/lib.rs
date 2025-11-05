@@ -4,15 +4,15 @@ use winit::event_loop::EventLoop;
 
 mod app;
 mod camera;
+mod gui;
 mod material;
 mod primitive;
+mod pt;
+mod scene;
 mod state;
+mod structure;
 mod texture;
 mod utils;
-mod gui;
-mod structure;
-mod scene;
-mod pt;
 
 use app::App;
 

@@ -1,9 +1,9 @@
 use wgpu::util::DeviceExt;
 
-use crate::utils::*;
-use crate::structure::*;
-use crate::primitive::Primitive;
 use crate::camera::{Camera, CameraUniforms};
+use crate::primitive::Primitive;
+use crate::structure::*;
+use crate::utils::*;
 
 pub struct PathTracing {
     render_pipeline: wgpu::RenderPipeline,
@@ -124,10 +124,7 @@ impl PathTracing {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[
-                    &camera_bind_group_layout,
-                    &scene_bind_group_layout,
-                ],
+                bind_group_layouts: &[&camera_bind_group_layout, &scene_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -347,7 +344,6 @@ impl PathTracing {
         rd.frame_id += 1;
     }
 }
-
 
 #[repr(C)]
 #[derive(Copy, Clone, Debug, bytemuck::Pod, bytemuck::Zeroable)]

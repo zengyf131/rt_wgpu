@@ -4,13 +4,13 @@ use std::sync::Arc;
 
 use egui::Context;
 use egui_wgpu::wgpu::{CommandEncoder, Device, Queue, StoreOp, TextureFormat, TextureView};
-use egui_wgpu::{wgpu, Renderer, ScreenDescriptor, RendererOptions};
+use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor, wgpu};
 use egui_winit::State;
 use winit::event::WindowEvent;
 use winit::window::Window;
 
-use crate::structure::*;
 use crate::camera::Camera;
+use crate::structure::*;
 
 pub struct EguiRenderer {
     state: State,
@@ -41,11 +41,7 @@ impl EguiRenderer {
 
         let egui_renderer_options = RendererOptions::default();
 
-        let egui_renderer = Renderer::new(
-            device,
-            output_color_format,
-            egui_renderer_options,
-        );
+        let egui_renderer = Renderer::new(device, output_color_format, egui_renderer_options);
 
         EguiRenderer {
             state: egui_state,
@@ -123,39 +119,52 @@ impl EguiRenderer {
         self.frame_started = false;
     }
 
-    pub fn render(
-        &self,
-        rd: &mut RenderData,
-        camera: &Camera,
-    ) {
-        egui::Window::new("Ray tracing")
-            .show(self.context(), |ui| {
-                egui::Grid::new("my_grid")
-                        .num_columns(1)
-                        .spacing([40.0, 4.0])
-                        .striped(true)
-                        .show(ui, |ui| {
-                    let cur_samples = u32::min(rd.frame_id * camera.samples_per_frame, camera.samples_per_pixel);
+    pub fn render(&self, rd: &mut RenderData, camera: &Camera) {
+        egui::Window::new("Ray tracing").show(self.context(), |ui| {
+            egui::Grid::new("my_grid")
+                .num_columns(1)
+                .spacing([40.0, 4.0])
+                .striped(true)
+                .show(ui, |ui| {
+                    let cur_samples = u32::min(
+                        rd.frame_id * camera.samples_per_frame,
+                        camera.samples_per_pixel,
+                    );
 
                     if cur_samples < camera.samples_per_pixel {
-                        ui.label(format!("Samples {}/{}", cur_samples, camera.samples_per_pixel));
+                        ui.label(format!(
+                            "Samples {}/{}",
+                            cur_samples, camera.samples_per_pixel
+                        ));
                         ui.end_row();
 
                         ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
                         ui.end_row();
-                        ui.label(format!("Avg frame time: {:.2}ms", rd.timer.elapsed() / rd.frame_id as f64));
+                        ui.label(format!(
+                            "Avg frame time: {:.2}ms",
+                            rd.timer.elapsed() / rd.frame_id as f64
+                        ));
                         // log!("Samples {}/{}", cur_samples, rd.samples_per_pixel);
                         // log!("Render time: {}", rd.timer.elapsed() / rd.frame_id as f64);
                     } else {
                         rd.timer.pause();
-                        ui.label(format!("Samples {}/{}", cur_samples, camera.samples_per_pixel));
+                        ui.label(format!(
+                            "Samples {}/{}",
+                            cur_samples, camera.samples_per_pixel
+                        ));
                         ui.end_row();
 
                         ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
                         ui.end_row();
-                        ui.label(format!("Avg frame time: {:.2}ms", rd.timer.elapsed() / (camera.samples_per_pixel as f64 / camera.samples_per_frame as f64).ceil()));
+                        ui.label(format!(
+                            "Avg frame time: {:.2}ms",
+                            rd.timer.elapsed()
+                                / (camera.samples_per_pixel as f64
+                                    / camera.samples_per_frame as f64)
+                                    .ceil()
+                        ));
                     }
                 });
-            });
+        });
     }
 }
