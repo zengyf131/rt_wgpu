@@ -5,8 +5,14 @@ use crate::primitive::Primitive;
 use crate::structure::*;
 use crate::utils::*;
 
-pub struct PathTracing {
+pub struct WavefrontPathTracing {
     render_pipeline: wgpu::RenderPipeline,
+    init_pipeline: wgpu::ComputePipeline,
+    logic_pipeline: wgpu::ComputePipeline,
+    new_path_pipeline: wgpu::ComputePipeline,
+    material_pipeline: wgpu::ComputePipeline,
+    ray_cast_pipeline: wgpu::ComputePipeline,
+
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
@@ -23,8 +29,13 @@ pub struct PathTracing {
     texture_buffer: wgpu::Buffer,
     tex_data_buffer: wgpu::Buffer,
     scene_bind_group: wgpu::BindGroup,
+
+    ray_pool_buffer: wgpu::Buffer,
+    queue_buffer: wgpu::Buffer,
+    dispatch_args_buffers: [wgpu::Buffer; 2],
+    compute_bind_groups: [wgpu::BindGroup; 2],
 }
-impl PathTracing {
+impl WavefrontPathTracing {
     pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
@@ -36,7 +47,7 @@ impl PathTracing {
                 entries: &[
                     wgpu::BindGroupLayoutEntry {
                         binding: 0,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -46,7 +57,7 @@ impl PathTracing {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 1,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Uniform,
                             has_dynamic_offset: false,
@@ -56,7 +67,7 @@ impl PathTracing {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 2,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: false },
                             has_dynamic_offset: false,
@@ -66,7 +77,7 @@ impl PathTracing {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 3,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
@@ -76,7 +87,7 @@ impl PathTracing {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 4,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
@@ -86,7 +97,7 @@ impl PathTracing {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 5,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
@@ -96,7 +107,7 @@ impl PathTracing {
                     },
                     wgpu::BindGroupLayoutEntry {
                         binding: 6,
-                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        visibility: wgpu::ShaderStages::FRAGMENT | wgpu::ShaderStages::COMPUTE,
                         ty: wgpu::BindingType::Buffer {
                             ty: wgpu::BufferBindingType::Storage { read_only: true },
                             has_dynamic_offset: false,
@@ -108,6 +119,43 @@ impl PathTracing {
                 label: Some("scene_bind_group_layout"),
             });
 
+        let compute_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 2,
+                        visibility: wgpu::ShaderStages::COMPUTE,
+                        ty: wgpu::BindingType::Buffer {
+                            ty: wgpu::BufferBindingType::Storage { read_only: false },
+                            has_dynamic_offset: false,
+                            min_binding_size: None,
+                        },
+                        count: None,
+                    },
+                ],
+                label: Some("compute_bind_group_layout"),
+            });
+
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: Some("Shader"),
             source: wgpu::ShaderSource::Wgsl(include_str!("raytracing.wgsl").into()),
@@ -116,7 +164,7 @@ impl PathTracing {
         let render_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
                 label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[&scene_bind_group_layout],
+                bind_group_layouts: &[&scene_bind_group_layout, &compute_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
@@ -158,6 +206,53 @@ impl PathTracing {
                 alpha_to_coverage_enabled: false,
             },
             multiview: None,
+            cache: None,
+        });
+
+        let compute_pipeline_layout =
+            device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
+                label: Some("compute_pipeline_layout"),
+                bind_group_layouts: &[&scene_bind_group_layout, &compute_bind_group_layout],
+                push_constant_ranges: &[],
+            });
+        let init_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("init_pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &shader,
+            entry_point: Some("wavefront_init"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        let logic_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("logic_pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &shader,
+            entry_point: Some("wavefront_logic"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        let new_path_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("new_path_pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &shader,
+            entry_point: Some("wavefront_new_path"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        let material_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("material_pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &shader,
+            entry_point: Some("wavefront_material"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
+            cache: None,
+        });
+        let ray_cast_pipeline = device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+            label: Some("ray_cast_pipeline"),
+            layout: Some(&compute_pipeline_layout),
+            module: &shader,
+            entry_point: Some("wavefront_ray_cast"),
+            compilation_options: wgpu::PipelineCompilationOptions::default(),
             cache: None,
         });
 
@@ -265,8 +360,84 @@ impl PathTracing {
             label: Some("scene_bind_group"),
         });
 
+        let ray_pool_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("ray_pool_buffer"),
+            size: (32 + 4 + 4 + 4 + 8 + 16 + 4 + 16 + 4 + 48 + 4 + 32) * (1 << 20) + 16,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let queue_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("queue_buffer"),
+            size: (1 << 20) * 4 * 3,
+            usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
+            mapped_at_creation: false,
+        });
+
+        let dispatch_args_buffer_0 = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dispatch_args_buffer_0"),
+            size: 4 * 4 * 2,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::INDIRECT,
+            mapped_at_creation: false,
+        });
+        let dispatch_args_buffer_1 = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("dispatch_args_buffer_1"),
+            size: 4 * 4 * 2,
+            usage: wgpu::BufferUsages::STORAGE
+                | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::INDIRECT,
+            mapped_at_creation: false,
+        });
+        let dispatch_args_buffers = [dispatch_args_buffer_0, dispatch_args_buffer_1];
+
+        let compute_bind_group_0 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &compute_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: ray_pool_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: queue_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: dispatch_args_buffers[0].as_entire_binding(),
+                },
+            ],
+            label: Some("compute_bind_group_0"),
+        });
+        let compute_bind_group_1 = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &compute_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: ray_pool_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: queue_buffer.as_entire_binding(),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 2,
+                    resource: dispatch_args_buffers[1].as_entire_binding(),
+                },
+            ],
+            label: Some("compute_bind_group_1"),
+        });
+        let compute_bind_groups = [compute_bind_group_0, compute_bind_group_1];
+
         Self {
             render_pipeline,
+            init_pipeline,
+            logic_pipeline,
+            new_path_pipeline,
+            material_pipeline,
+            ray_cast_pipeline,
+
             vertex_buffer,
             index_buffer,
             num_indices,
@@ -283,10 +454,15 @@ impl PathTracing {
             texture_buffer,
             tex_data_buffer,
             scene_bind_group,
+
+            queue_buffer,
+            ray_pool_buffer,
+            dispatch_args_buffers,
+            compute_bind_groups,
         }
     }
 }
-impl Renderer for PathTracing {
+impl Renderer for WavefrontPathTracing {
     fn render(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -301,6 +477,86 @@ impl Renderer for PathTracing {
             0,
             bytemuck::bytes_of(&self.camera_uniforms),
         );
+
+        if self.camera_uniforms.frame_id * self.camera_uniforms.samples_per_frame
+            < self.camera_uniforms.samples_per_pixel
+        {
+            let wg = (self.camera_uniforms.image_wh[0] * self.camera_uniforms.image_wh[1])
+                .min(1 << 20)
+                .div_ceil(256);
+            {
+                encoder.clear_buffer(&self.dispatch_args_buffers[0], 0, Some(32));
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("compute_pass"),
+                    timestamp_writes: None,
+                });
+
+                compute_pass.set_pipeline(&self.init_pipeline);
+                compute_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                compute_pass.set_bind_group(1, &self.compute_bind_groups[0], &[]);
+                compute_pass.dispatch_workgroups(wg, 1, 1);
+            }
+            {
+                let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                    label: Some("compute_pass"),
+                    timestamp_writes: None,
+                });
+                compute_pass.set_pipeline(&self.ray_cast_pipeline);
+                compute_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                compute_pass.set_bind_group(1, &self.compute_bind_groups[1], &[]);
+                compute_pass.dispatch_workgroups_indirect(&self.dispatch_args_buffers[0], 0);
+            }
+
+            let max_iter = (self.camera_uniforms.image_wh[0] * self.camera_uniforms.image_wh[1])
+                .div_ceil(1 << 20)
+                * self.camera_uniforms.max_depth;
+            for _i in 0..max_iter {
+                {
+                    encoder.clear_buffer(&self.dispatch_args_buffers[0], 0, Some(32));
+                    let mut compute_pass =
+                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("compute_pass"),
+                            timestamp_writes: None,
+                        });
+
+                    compute_pass.set_pipeline(&self.logic_pipeline);
+                    compute_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                    compute_pass.set_bind_group(1, &self.compute_bind_groups[0], &[]);
+                    compute_pass.dispatch_workgroups(wg, 1, 1);
+                }
+
+                {
+                    encoder.clear_buffer(&self.dispatch_args_buffers[1], 0, Some(32));
+                    let mut compute_pass =
+                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("compute_pass"),
+                            timestamp_writes: None,
+                        });
+
+                    compute_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                    compute_pass.set_bind_group(1, &self.compute_bind_groups[1], &[]);
+
+                    compute_pass.set_pipeline(&self.new_path_pipeline);
+                    compute_pass.dispatch_workgroups_indirect(&self.dispatch_args_buffers[0], 0);
+
+                    compute_pass.set_pipeline(&self.material_pipeline);
+                    compute_pass.dispatch_workgroups_indirect(&self.dispatch_args_buffers[0], 16);
+                }
+
+                {
+                    let mut compute_pass =
+                        encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
+                            label: Some("compute_pass"),
+                            timestamp_writes: None,
+                        });
+
+                    compute_pass.set_pipeline(&self.ray_cast_pipeline);
+                    compute_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+                    compute_pass.set_bind_group(1, &self.compute_bind_groups[0], &[]);
+                    compute_pass.dispatch_workgroups_indirect(&self.dispatch_args_buffers[1], 0);
+                }
+            }
+        }
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
@@ -321,6 +577,7 @@ impl Renderer for PathTracing {
 
             render_pass.set_pipeline(&self.render_pipeline);
             render_pass.set_bind_group(0, &self.scene_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.compute_bind_groups[0], &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);

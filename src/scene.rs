@@ -67,7 +67,7 @@ pub fn bouncing_spheres() -> (Camera, Box<dyn Primitive>) {
     let camera = Camera {
         image_width: 1920,
         image_height: 1080,
-        samples_per_pixel: 50,
+        samples_per_pixel: 500,
         max_depth: 50,
         samples_per_frame: 1,
         vfov: 20.0,
@@ -159,7 +159,7 @@ pub fn bouncing_spheres() -> (Camera, Box<dyn Primitive>) {
         material3,
     )));
 
-    // let bvh_world = BVHNode::from_prim_list(world);
+    let world = BVHNode::from_prim_list(world);
 
     (camera, Box::new(world))
 }

@@ -132,6 +132,7 @@ impl EguiRenderer {
                     );
 
                     if cur_samples < camera.samples_per_pixel {
+                        rd.timer.start();
                         ui.label(format!(
                             "Samples {}/{}",
                             cur_samples, camera.samples_per_pixel
@@ -142,7 +143,7 @@ impl EguiRenderer {
                         ui.end_row();
                         ui.label(format!(
                             "Avg frame time: {:.2}ms",
-                            rd.timer.elapsed() / rd.frame_id as f64
+                            rd.timer.elapsed() / (rd.frame_id as f64 - 1.0)
                         ));
                         // log!("Samples {}/{}", cur_samples, rd.samples_per_pixel);
                         // log!("Render time: {}", rd.timer.elapsed() / rd.frame_id as f64);

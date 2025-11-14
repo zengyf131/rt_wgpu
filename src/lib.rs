@@ -13,6 +13,7 @@ mod state;
 mod structure;
 mod texture;
 mod utils;
+mod wfpt;
 
 use app::App;
 

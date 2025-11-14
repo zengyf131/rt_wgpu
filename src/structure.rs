@@ -1,15 +1,25 @@
 use crate::utils::*;
 
+pub trait Renderer {
+    fn render(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        queue: &wgpu::Queue,
+        view: &wgpu::TextureView,
+        rd: &mut RenderData,
+    );
+}
+
 pub struct RenderData {
     pub frame_id: u32,
     pub timer: Timer,
 }
 impl RenderData {
     pub fn new() -> Self {
-        let mut timer = Timer::new();
-        timer.start();
-
-        Self { frame_id: 0, timer }
+        Self {
+            frame_id: 0,
+            timer: Timer::new(),
+        }
     }
 }
 
@@ -72,6 +82,7 @@ pub struct TextureRaw {
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SceneUniforms {
+    pub renderer_type: u32,
     pub root_id: u32,
     pub use_bvh: u32,
 }

@@ -17,6 +17,7 @@ use crate::log;
 use crate::pt::PathTracing;
 use crate::scene::*;
 use crate::structure::*;
+use crate::wfpt::WavefrontPathTracing;
 
 // This will store the state of our game
 pub struct State {
@@ -30,7 +31,7 @@ pub struct State {
     mouse_pos: (f64, f64),
 
     camera: Camera,
-    renderer: PathTracing,
+    renderer: Box<dyn Renderer>,
     egui_renderer: EguiRenderer,
     gui_enable: bool,
     render_data: RenderData,
@@ -40,7 +41,7 @@ impl State {
     // We don't need this to be async right now,
     // but we will in the next tutorial
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let (camera, world) = cornell_box();
+        let (camera, world) = final_scene();
 
         let image_width = camera.image_width;
         let image_height = camera.image_height;
@@ -75,9 +76,15 @@ impl State {
                 // WebGL doesn't support all of wgpu's features, so if
                 // we're building for the web we'll have to disable some.
                 required_limits: if cfg!(target_arch = "wasm32") {
-                    wgpu::Limits::default()
+                    wgpu::Limits {
+                        max_storage_buffer_binding_size: 1 << 30,
+                        ..Default::default()
+                    }
                 } else {
-                    wgpu::Limits::default()
+                    wgpu::Limits {
+                        max_storage_buffer_binding_size: 1 << 30,
+                        ..Default::default()
+                    }
                 },
                 memory_hints: Default::default(),
                 trace: wgpu::Trace::Off,
@@ -106,7 +113,8 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let renderer = PathTracing::new(&device, &config, &camera, world);
+        // let renderer = Box::new(PathTracing::new(&device, &config, &camera, world));
+        let renderer = Box::new(WavefrontPathTracing::new(&device, &config, &camera, world));
         let egui_renderer = EguiRenderer::new(&device, config.format, window.clone());
 
         Ok(Self {
