@@ -2,6 +2,7 @@ use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, CameraUniforms};
 use crate::primitive::Primitive;
+use crate::scene::Scene;
 use crate::structure::*;
 use crate::utils::*;
 
@@ -17,7 +18,6 @@ pub struct WavefrontPathTracing {
     index_buffer: wgpu::Buffer,
     num_indices: u32,
 
-    world: Box<dyn Primitive>,
     scene_uniforms: SceneUniforms,
     camera_uniforms: CameraUniforms,
 
@@ -39,8 +39,7 @@ impl WavefrontPathTracing {
     pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
-        camera: &Camera,
-        mut world: Box<dyn Primitive>,
+        scene: &mut Scene,
     ) -> Self {
         let scene_bind_group_layout =
             device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
@@ -269,7 +268,13 @@ impl WavefrontPathTracing {
         let num_indices = INDICES.len() as u32;
 
         let mut raw_vec = RawVec::new();
-        let root_id = world.to_raw(&mut raw_vec);
+        let root_id = scene.world.to_raw(&mut raw_vec) as u32;
+        let light_id: i32;
+        if let Some(lights) = scene.lights.as_mut() {
+            light_id = lights.to_raw(&mut raw_vec) as i32;
+        } else {
+            light_id = -1;
+        }
         if raw_vec.tex_data.is_empty() {
             raw_vec.tex_data.push(0.0);
         }
@@ -277,11 +282,11 @@ impl WavefrontPathTracing {
 
         let scene_uniforms = SceneUniforms {
             renderer_type: 0,
-            root_id: root_id as u32,
-            use_bvh: 1,
+            root_id,
+            light_id,
         };
 
-        let camera_uniforms = camera.to_raw();
+        let camera_uniforms = scene.camera.to_raw();
         let camera_uniforms_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Camera Uniforms Buffer"),
             contents: bytemuck::cast_slice(&[camera_uniforms]),
@@ -442,7 +447,6 @@ impl WavefrontPathTracing {
             index_buffer,
             num_indices,
 
-            world,
             scene_uniforms,
             camera_uniforms,
 

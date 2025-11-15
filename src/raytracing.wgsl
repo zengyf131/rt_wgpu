@@ -50,8 +50,7 @@ fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
 struct SceneMetadata {
     renderer_type: u32,
     root_id: u32,
-    use_bvh: u32,
-    // light_id: u32,
+    light_id: i32,
 }
 
 // Camera
@@ -135,29 +134,47 @@ fn pt_ray_color(primary_ray: Ray, rng_state: ptr<function, u32>) -> vec3<f32> {
     var depth = 0u;
     var ray_color = vec3(0.0);
     var attenuation = vec3(1.0);
+    var do_mis = false;
+    var mis_bsdf_pdf = 0.0;
 
     while depth < camera.max_depth {
         var rec = hit_record_new();
-        var hit = false;
-        if scene_metadata.use_bvh == 1u {
-            hit = primitive_hit(scene_metadata.root_id, ray, Interval(0.001, INF), &rec, rng_state);
-        } else {
-            hit = primitive_hit_list(ray, Interval(0.001, INF), &rec, rng_state);
-        }
-        if hit {
-            var srec = scatter_record_new();
-            let b_emit = material_emitted(rec.mat_id, rec, rec.uv, rec.p);
-            if material_scatter(rec.mat_id, ray, rec, &srec, rng_state) {
+        if primitive_hit(scene_metadata.root_id, ray, Interval(0.001, INF), &rec, rng_state) {
+            if do_mis {
+                do_mis = false;
+                let lid = u32(scene_metadata.light_id);
+                var light_rec = hit_record_new();
+                let light_hit = primitive_hit(lid, ray, Interval(0.001, INF), &light_rec, rng_state);
+                if light_hit && rec.t == light_rec.t {
+                    let light_pdf = primitive_pdf_value(lid, ray, light_rec, rng_state);
+                    let bsdf_weight = mis_bsdf_pdf / (mis_bsdf_pdf + light_pdf);
+                    attenuation *= bsdf_weight;
+                }
+            }
+            var srec = bsdf_record_new();
+            let b_emit = material_emitted(rec.mat_id, rec);
+            if material_scatter(rec.mat_id, rec, ray.dir, &srec, rng_state) {
                 // Light importance sampling
-                // scattered = Ray(rec.p, primitive_random(scene_metadata.light_id, rec.p, rng_state), r.tm);
-                // pdf_value = primitive_pdf_value(scene_metadata.light_id, rec.p, scattered.dir, rng_state);
+                if scene_metadata.light_id >= 0 && material_support_eval(rec.mat_id) {
+                    do_mis = true;
+                    mis_bsdf_pdf = srec.pdf;
+                    let lid = u32(scene_metadata.light_id);
+                    let light_ray = Ray(rec.p, primitive_random(lid, rng_state) - rec.p, ray.tm);
+                    var light_rec = hit_record_new();
+                    let light_hit = primitive_hit(scene_metadata.root_id, light_ray, Interval(0.001, 1.001), &light_rec, rng_state);
+                    if light_hit && abs(light_rec.t - 1.0) <= 0.001 {
+                        let light_pdf = primitive_pdf_value(lid, light_ray, light_rec, rng_state);
+                        let light_srec = material_eval(rec.mat_id, rec, ray.dir, light_ray.dir);
+                        let light_emit = material_emitted(light_rec.mat_id, light_rec);
+                        let light_weight = light_pdf / (light_srec.pdf + light_pdf);
+                        let light_sample = light_weight * light_srec.fs * light_emit / light_pdf;
+                        ray_color += attenuation * light_sample;
+                    }
+                }
 
-                let scattering_pdf = material_scatter_pdf(rec.mat_id, ray, rec, srec.scatter_direction);
-                let pdf_value = scattering_pdf;
-
-                ray = Ray(rec.p, srec.scatter_direction, ray.tm);
+                ray = Ray(rec.p, srec.wo, ray.tm);
                 ray_color += attenuation * b_emit;
-                attenuation *= srec.attenuation * scattering_pdf / pdf_value;
+                attenuation *= srec.fs / srec.pdf;
                 depth += 1u;
             } else {
                 ray_color += attenuation * b_emit;
@@ -185,7 +202,7 @@ struct WavefrontRayPool {
     rng_state: array<u32, 1048576>,
     rec: array<HitRecord, 1048576>,
     hit: array<u32, 1048576>,
-    srec: array<ScatterRecord, 1048576>,
+    srec: array<BSDFRecord, 1048576>,
     ray_count: atomic<u32>,
 }
 
@@ -238,8 +255,8 @@ fn wavefront_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
         wf_queues.material[material_index] = gid.x;
 
         // Update attenuation
-        let pdf_value = wf_ray_pool.srec[i].sample_pdf;
-        wf_ray_pool.attenuation[i] *= wf_ray_pool.srec[i].attenuation * wf_ray_pool.srec[i].scatter_pdf / pdf_value;
+        let pdf_value = wf_ray_pool.srec[i].pdf;
+        wf_ray_pool.attenuation[i] *= wf_ray_pool.srec[i].fs / pdf_value;
         wf_ray_pool.depth[i] += 1u;
     }
 }
@@ -270,7 +287,7 @@ fn wavefront_new_path(@builtin(global_invocation_id) gid: vec3<u32>) {
     wf_ray_pool.rng_state[i] = rng_state;
     wf_ray_pool.rec[i] = hit_record_new();
     wf_ray_pool.hit[i] = 0u;
-    wf_ray_pool.srec[i] = scatter_record_new();
+    wf_ray_pool.srec[i] = bsdf_record_new();
 
     // Request ray cast
     let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
@@ -303,7 +320,7 @@ fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
     wf_ray_pool.rng_state[i] = rng_state;
     wf_ray_pool.rec[i] = hit_record_new();
     wf_ray_pool.hit[i] = 0u;
-    wf_ray_pool.srec[i] = scatter_record_new();
+    wf_ray_pool.srec[i] = bsdf_record_new();
 
     // Request ray cast
     let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
@@ -314,13 +331,13 @@ fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
 fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = wf_queues.material[gid.x];
 
-    let emission = material_emitted(wf_ray_pool.rec[i].mat_id, wf_ray_pool.rec[i], wf_ray_pool.rec[i].uv, wf_ray_pool.rec[i].p);
+    let emission = material_emitted(wf_ray_pool.rec[i].mat_id, wf_ray_pool.rec[i]);
 
     var srec = wf_ray_pool.srec[i];
     var rng_state = wf_ray_pool.rng_state[i];
-    let bounce = material_scatter(wf_ray_pool.rec[i].mat_id, wf_ray_pool.ray[i], wf_ray_pool.rec[i], &srec, &rng_state);
+    let bounce = material_scatter(wf_ray_pool.rec[i].mat_id, wf_ray_pool.rec[i], wf_ray_pool.ray[i].dir, &srec, &rng_state);
 
-    wf_ray_pool.ray[i] = Ray(wf_ray_pool.rec[i].p, srec.scatter_direction, wf_ray_pool.ray[i].tm);
+    wf_ray_pool.ray[i] = Ray(wf_ray_pool.rec[i].p, srec.wo, wf_ray_pool.ray[i].tm);
     wf_ray_pool.srec[i] = srec;
     wf_ray_pool.rng_state[i] = rng_state;
     wf_ray_pool.terminated[i] = u32(!bounce);
@@ -340,11 +357,7 @@ fn wavefront_ray_cast(@builtin(global_invocation_id) gid: vec3<u32>) {
     var rec = hit_record_new();
     var rng_state = wf_ray_pool.rng_state[i];
     var hit = false;
-    if scene_metadata.use_bvh == 1u {
-        hit = primitive_hit(scene_metadata.root_id, wf_ray_pool.ray[i], Interval(0.001, INF), &rec, &rng_state);
-    } else {
-        hit = primitive_hit_list(wf_ray_pool.ray[i], Interval(0.001, INF), &rec, &rng_state);
-    }
+    hit = primitive_hit(scene_metadata.root_id, wf_ray_pool.ray[i], Interval(0.001, INF), &rec, &rng_state);
 
     wf_ray_pool.hit[i] = u32(hit);
     wf_ray_pool.rec[i] = rec;
@@ -768,25 +781,21 @@ fn primitive_hit(pid: u32, _r: Ray, _ray_t: Interval, _rec: ptr<function, HitRec
     return hit;
 }
 
-fn primitive_pdf_value(pid: u32, origin: vec3<f32>, direction: vec3<f32>, rng_state: ptr<function, u32>) -> f32 {
+fn primitive_pdf_value(pid: u32, ray: Ray, rec: HitRecord, rng_state: ptr<function, u32>) -> f32 {
     let prim = primitive_list[pid];
     switch prim.type_id {
         case 2u: { // quad
             let area = prim.data4.w;
 
-            var rec = hit_record_new();
-            if !primitive_hit(pid, Ray(origin, direction, 0.0), Interval(0.001, INF), &rec, rng_state) {
-                return 0.0;
-            }
-            let distance_squared = rec.t * rec.t * dot(direction, direction);
-            let cosine = abs(dot(direction, rec.normal) / length(direction));
+            let distance_squared = rec.t * rec.t * dot(ray.dir, ray.dir);
+            let cosine = abs(dot(ray.dir, rec.normal) / length(ray.dir));
             return distance_squared / (cosine * area);
         }
         default: { return 0.0; }
     }
 }
 
-fn primitive_random(pid: u32, origin: vec3<f32>, rng_state: ptr<function, u32>) -> vec3<f32> {
+fn primitive_random(pid: u32, rng_state: ptr<function, u32>) -> vec3<f32> {
     let prim = primitive_list[pid];
     switch prim.type_id {
         case 2u: { // quad
@@ -795,26 +804,10 @@ fn primitive_random(pid: u32, origin: vec3<f32>, rng_state: ptr<function, u32>) 
             let v = prim.data2.xyz;
 
             let p = q + (random_f32(rng_state) * u) + (random_f32(rng_state) * v);
-            return p - origin;
+            return p;
         }
         default: { return vec3(0.0); }
     }
-}
-
-fn primitive_hit_list(r: Ray, ray_t: Interval, rec: ptr<function, HitRecord>, rng_state: ptr<function, u32>) -> bool {
-    var temp_rec = hit_record_new();
-    var hit_anything = false;
-    var closest_so_far = ray_t.max;
-    for (var i = 0u; i < arrayLength(&primitive_list); i = i + 1u) {
-        let hit = primitive_hit(i , r, Interval(ray_t.min, closest_so_far), &temp_rec, rng_state);
-        if hit {
-            hit_anything = true;
-            closest_so_far = temp_rec.t;
-            (*rec) = temp_rec;
-        }
-    }
-
-    return hit_anything;
 }
 
 fn get_sphere_uv(p: vec3<f32>) -> vec2<f32> {
@@ -828,18 +821,16 @@ fn get_sphere_uv(p: vec3<f32>) -> vec2<f32> {
 }
 
 // Material
-struct ScatterRecord {
-    scatter_direction: vec3<f32>,
-    scatter_pdf: f32,
-    attenuation: vec3<f32>,
-    sample_pdf: f32,
+struct BSDFRecord {
+    fs: vec3<f32>,
+    wo: vec3<f32>,
+    pdf: f32,
 };
 
-fn scatter_record_new() -> ScatterRecord {
-    return ScatterRecord(
-        vec3(0.0),
-        1.0,
+fn bsdf_record_new() -> BSDFRecord {
+    return BSDFRecord(
         vec3(1.0),
+        vec3(0.0),
         1.0,
     );
 }
@@ -852,9 +843,9 @@ struct Material {
 
 fn material_scatter(
     mat_id: u32,
-    r_in: Ray,
     rec: HitRecord,
-    srec: ptr<function, ScatterRecord>,
+    wi: vec3<f32>,
+    srec: ptr<function, BSDFRecord>,
     rng_state: ptr<function, u32>,
 ) -> bool {
     let mat = material_list[mat_id];
@@ -862,22 +853,23 @@ fn material_scatter(
         case 0u: { // lambertian
             let uvw = onb_new(rec.normal);
             var scatter_direction = normalize(onb_transform(uvw, random_cosine_direction(rng_state)));
+            let pdf = dot(uvw.w, scatter_direction) / PI;
 
-            (*srec).scatter_direction = scatter_direction;
-            (*srec).scatter_pdf = dot(uvw.w, scatter_direction) / PI;
-            (*srec).attenuation = texture_value(u32(mat.tex_id), rec.uv, rec.p);
+            (*srec).fs = texture_value(u32(mat.tex_id), rec.uv, rec.p) * pdf;
+            (*srec).wo = scatter_direction;
+            (*srec).pdf = pdf;
             return true;
         }
         case 1u: { // metal
             let albedo = mat.data0.xyz;
             let fuzz = mat.data0.w;
 
-            var reflected = reflect(r_in.dir, rec.normal);
+            var reflected = reflect(wi, rec.normal);
             reflected = normalize(reflected) + (fuzz * random_vec3_unit(rng_state));
 
-            (*srec).scatter_direction = reflected;
-            (*srec).scatter_pdf = 1.0;
-            (*srec).attenuation = albedo;
+            (*srec).fs = albedo;
+            (*srec).wo = reflected;
+            (*srec).pdf = 1.0;
             return true;
         }
         case 2u: { // dielectric
@@ -887,7 +879,7 @@ fn material_scatter(
             if rec.front_face == 1u {
                 ri = 1.0 / refraction_index;
             }
-            let unit_direction = normalize(r_in.dir);
+            let unit_direction = normalize(wi);
             let cos_theta = min(dot(-unit_direction, rec.normal), 1.0);
             let sin_theta = sqrt(1.0 - cos_theta * cos_theta);
             let cannot_refract = ri * sin_theta > 1.0;
@@ -898,18 +890,19 @@ fn material_scatter(
                 direction = refract(unit_direction, rec.normal, ri);
             }
 
-            (*srec).scatter_direction = direction;
-            (*srec).scatter_pdf = 1.0;
-            (*srec).attenuation = vec3(1.0);
+            (*srec).fs = vec3(1.0);
+            (*srec).wo = direction;
+            (*srec).pdf = 1.0;
             return true;
         }
         case 3u: { // diffuse light
             return false;
         }
         case 4u: { // isotropic
-            (*srec).scatter_direction = random_vec3_unit(rng_state);
-            (*srec).scatter_pdf = 1.0 / (4.0 * PI);
-            (*srec).attenuation = texture_value(u32(mat.tex_id), rec.uv, rec.p);
+            let pdf = 1.0 / (4.0 * PI);
+            (*srec).fs = texture_value(u32(mat.tex_id), rec.uv, rec.p) * pdf;
+            (*srec).wo = random_vec3_unit(rng_state);
+            (*srec).pdf = pdf;
             return true;
         }
         default: {
@@ -918,40 +911,57 @@ fn material_scatter(
     }
 }
 
-fn material_scatter_pdf(
-    mat_id: u32,
-    r_in: Ray,
-    rec: HitRecord,
-    scattered_dir: vec3<f32>,
-) -> f32 {
+fn material_support_eval(mat_id: u32) -> bool {
     let mat = material_list[mat_id];
     switch mat.type_id {
         case 0u: { // Lambertian
-            let cos_theta = dot(rec.normal, normalize(scattered_dir));
-            if cos_theta < 0.0 {
-                return 0.0;
-            } else {
-                return cos_theta / PI;
-            }
+            return true;
         }
         case 1u: {
-            return 1.0;
+            return false;
         }
         case 2u: {
-            return 1.0;
+            return false;
+        }
+        case 3u: {
+            return false;
         }
         case 4u: { // isotropic
-            return 1.0 / (4.0 * PI);
+            return true;
         }
-        default: { return 0.0; }
+        default: { return false; }
+    }
+}
+
+fn material_eval(
+    mat_id: u32,
+    rec: HitRecord,
+    wi: vec3<f32>,
+    wo: vec3<f32>,
+) -> BSDFRecord {
+    let mat = material_list[mat_id];
+    switch mat.type_id {
+        case 0u: { // Lambertian
+            let cos_theta = dot(rec.normal, normalize(wo));
+            var pdf = 0.0;
+            if cos_theta >= 0.0 {
+                pdf = cos_theta / PI;
+            }
+            let fs = texture_value(u32(mat.tex_id), rec.uv, rec.p) * pdf;
+            return BSDFRecord(fs, wo, pdf);
+        }
+        case 4u: { // isotropic
+            let pdf = 1.0 / (4.0 * PI);
+            let fs = texture_value(u32(mat.tex_id), rec.uv, rec.p) * pdf;
+            return BSDFRecord(fs, wo, pdf);
+        }
+        default: { return bsdf_record_new(); }
     }
 }
 
 fn material_emitted(
     mat_id: u32,
     rec: HitRecord,
-    uv: vec2<f32>,
-    p: vec3<f32>,
 ) -> vec3<f32> {
     let mat = material_list[mat_id];
     switch mat.type_id {
@@ -959,7 +969,7 @@ fn material_emitted(
             if rec.front_face == 0u {
                 return vec3(0.0);
             }
-            return texture_value(u32(mat.tex_id), uv, p);
+            return texture_value(u32(mat.tex_id), rec.uv, rec.p);
         }
         default: {
             return vec3(0.0);

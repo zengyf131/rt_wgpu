@@ -10,7 +10,13 @@ use crate::primitive::*;
 use crate::texture::*;
 use crate::utils::*;
 
-pub fn get_world_0() -> (Camera, Box<dyn Primitive>) {
+pub struct Scene {
+    pub camera: Camera,
+    pub world: Box<dyn Primitive>,
+    pub lights: Option<Box<dyn Primitive>>,
+}
+
+pub fn get_world_0() -> Scene {
     let camera = Camera {
         image_width: 1920,
         image_height: 1080,
@@ -26,7 +32,7 @@ pub fn get_world_0() -> (Camera, Box<dyn Primitive>) {
         background: vec3(0.7, 0.8, 1.0),
     };
 
-    let mut world = PrimitiveList::new();
+    let mut world = Box::new(PrimitiveList::new());
 
     let material_ground = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.8, 0.8, 0.0))));
     let material_center = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.1, 0.2, 0.5))));
@@ -60,10 +66,14 @@ pub fn get_world_0() -> (Camera, Box<dyn Primitive>) {
         material_right,
     )));
 
-    (camera, Box::new(world))
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
-pub fn bouncing_spheres() -> (Camera, Box<dyn Primitive>) {
+pub fn bouncing_spheres() -> Scene {
     let camera = Camera {
         image_width: 1920,
         image_height: 1080,
@@ -159,12 +169,16 @@ pub fn bouncing_spheres() -> (Camera, Box<dyn Primitive>) {
         material3,
     )));
 
-    let world = BVHNode::from_prim_list(world);
+    let world = Box::new(BVHNode::from_prim_list(world));
 
-    (camera, Box::new(world))
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
-pub fn earth() -> (Camera, Box<dyn Primitive>) {
+pub fn earth() -> Scene {
     let camera = Camera {
         image_width: 1920,
         image_height: 1080,
@@ -184,12 +198,16 @@ pub fn earth() -> (Camera, Box<dyn Primitive>) {
         "earthmap.jpg"
     ))));
     let earth_surface = Rc::new(RefCell::new(Lambertian::new(earth_texture)));
-    let globe = Box::new(Sphere::sphere(vec3(0.0, 0.0, 0.0), 2.0, earth_surface));
+    let world = Box::new(Sphere::sphere(vec3(0.0, 0.0, 0.0), 2.0, earth_surface));
 
-    (camera, globe)
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
-pub fn perlin_spheres() -> (Camera, Box<dyn Primitive>) {
+pub fn perlin_spheres() -> Scene {
     let camera = Camera {
         image_width: 1920,
         image_height: 1080,
@@ -219,10 +237,14 @@ pub fn perlin_spheres() -> (Camera, Box<dyn Primitive>) {
         Rc::new(RefCell::new(Lambertian::new(pertext))),
     )));
 
-    (camera, world)
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
-pub fn quads() -> (Camera, Box<dyn Primitive>) {
+pub fn quads() -> Scene {
     let camera = Camera {
         image_width: 1080,
         image_height: 1080,
@@ -279,10 +301,14 @@ pub fn quads() -> (Camera, Box<dyn Primitive>) {
         lower_teal,
     )));
 
-    (camera, world)
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
-pub fn simple_light() -> (Camera, Box<dyn Primitive>) {
+pub fn simple_light() -> Scene {
     let camera = Camera {
         image_width: 1920,
         image_height: 1080,
@@ -325,14 +351,18 @@ pub fn simple_light() -> (Camera, Box<dyn Primitive>) {
         difflight,
     )));
 
-    (camera, world)
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
-pub fn cornell_box() -> (Camera, Box<dyn Primitive>) {
+pub fn cornell_box() -> Scene {
     let camera = Camera {
         image_width: 1080,
         image_height: 1080,
-        samples_per_pixel: 200,
+        samples_per_pixel: 10,
         max_depth: 50,
         samples_per_frame: 1,
         vfov: 40.0,
@@ -369,7 +399,7 @@ pub fn cornell_box() -> (Camera, Box<dyn Primitive>) {
         vec3(343.0, 554.0, 332.0),
         vec3(-130.0, 0.0, 0.0),
         vec3(0.0, 0.0, -105.0),
-        light,
+        light.clone(),
     )));
     world.add(Box::new(Quad::new(
         vec3(0.0, 0.0, 0.0),
@@ -404,10 +434,21 @@ pub fn cornell_box() -> (Camera, Box<dyn Primitive>) {
     let box2 = Box::new(Translate::new(box2, vec3(130.0, 0.0, 65.0)));
     world.add(box2);
 
-    (camera, world)
+    let lights = Box::new(Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light,
+    ));
+
+    Scene {
+        camera,
+        world,
+        lights: Some(lights),
+    }
 }
 
-pub fn cornell_smoke() -> (Camera, Box<dyn Primitive>) {
+pub fn cornell_smoke() -> Scene {
     let camera = Camera {
         image_width: 600,
         image_height: 600,
@@ -490,10 +531,14 @@ pub fn cornell_smoke() -> (Camera, Box<dyn Primitive>) {
         vec3(1.0, 1.0, 1.0),
     )));
 
-    (camera, world)
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
-pub fn final_scene() -> (Camera, Box<dyn Primitive>) {
+pub fn final_scene() -> Scene {
     let camera = Camera {
         image_width: 1080,
         image_height: 1080,
@@ -626,7 +671,11 @@ pub fn final_scene() -> (Camera, Box<dyn Primitive>) {
         vec3(-100.0, 270.0, 395.0),
     )));
 
-    (camera, world)
+    Scene {
+        camera,
+        world,
+        lights: None,
+    }
 }
 
 // Returns the 3D box (six sides) that contains the two opposite vertices a & b.

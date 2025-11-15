@@ -30,7 +30,7 @@ pub struct State {
 
     mouse_pos: (f64, f64),
 
-    camera: Camera,
+    scene: Scene,
     renderer: Box<dyn Renderer>,
     egui_renderer: EguiRenderer,
     gui_enable: bool,
@@ -41,10 +41,10 @@ impl State {
     // We don't need this to be async right now,
     // but we will in the next tutorial
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let (camera, world) = final_scene();
+        let mut scene = cornell_box();
 
-        let image_width = camera.image_width;
-        let image_height = camera.image_height;
+        let image_width = scene.camera.image_width;
+        let image_height = scene.camera.image_height;
         let size = PhysicalSize::<u32>::new(image_width, image_height);
         let _ = window.request_inner_size(size);
 
@@ -113,8 +113,8 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        // let renderer = Box::new(PathTracing::new(&device, &config, &camera, world));
-        let renderer = Box::new(WavefrontPathTracing::new(&device, &config, &camera, world));
+        let renderer = Box::new(PathTracing::new(&device, &config, &mut scene));
+        // let renderer = Box::new(WavefrontPathTracing::new(&device, &config, &mut scene));
         let egui_renderer = EguiRenderer::new(&device, config.format, window.clone());
 
         Ok(Self {
@@ -127,7 +127,7 @@ impl State {
 
             mouse_pos: (0.0, 0.0),
 
-            camera,
+            scene,
             renderer,
             egui_renderer,
             gui_enable: true,
@@ -193,7 +193,7 @@ impl State {
             self.egui_renderer.begin_frame(self.window.clone());
 
             self.egui_renderer
-                .render(&mut self.render_data, &self.camera);
+                .render(&mut self.render_data, &self.scene.camera);
 
             self.egui_renderer.end_frame_and_draw(
                 &self.device,

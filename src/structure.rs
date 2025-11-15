@@ -84,7 +84,7 @@ pub struct TextureRaw {
 pub struct SceneUniforms {
     pub renderer_type: u32,
     pub root_id: u32,
-    pub use_bvh: u32,
+    pub light_id: i32,
 }
 
 #[repr(C)]
