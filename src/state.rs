@@ -78,11 +78,13 @@ impl State {
                 required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits {
                         max_storage_buffer_binding_size: 1 << 30,
+                        max_buffer_size: 1 << 30,
                         ..Default::default()
                     }
                 } else {
                     wgpu::Limits {
                         max_storage_buffer_binding_size: 1 << 30,
+                        max_buffer_size: 1 << 30,
                         ..Default::default()
                     }
                 },

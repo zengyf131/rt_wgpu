@@ -13,6 +13,7 @@ pub struct WavefrontPathTracing {
     new_path_pipeline: wgpu::ComputePipeline,
     material_pipeline: wgpu::ComputePipeline,
     ray_cast_pipeline: wgpu::ComputePipeline,
+    ray_cast_light_pipeline: wgpu::ComputePipeline,
 
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
@@ -254,6 +255,15 @@ impl WavefrontPathTracing {
             compilation_options: wgpu::PipelineCompilationOptions::default(),
             cache: None,
         });
+        let ray_cast_light_pipeline =
+            device.create_compute_pipeline(&wgpu::ComputePipelineDescriptor {
+                label: Some("ray_cast_light_pipeline"),
+                layout: Some(&compute_pipeline_layout),
+                module: &shader,
+                entry_point: Some("wavefront_ray_cast_light"),
+                compilation_options: wgpu::PipelineCompilationOptions::default(),
+                cache: None,
+            });
 
         let vertex_buffer = device.create_buffer_init(&wgpu::util::BufferInitDescriptor {
             label: Some("Vertex Buffer"),
@@ -367,14 +377,16 @@ impl WavefrontPathTracing {
 
         let ray_pool_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ray_pool_buffer"),
-            size: (32 + 4 + 4 + 4 + 8 + 16 + 4 + 16 + 4 + 48 + 4 + 32) * (1 << 20) + 16,
+            size: (32 + 32 + 4 + 4 + 4 + 8 + 16 + 4 + 16 + 4 + 48 + 4 + 4 + 48 + 4 + 32 + 32)
+                * (1 << 20)
+                + 16,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let queue_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("queue_buffer"),
-            size: (1 << 20) * 4 * 3,
+            size: (1 << 20) * 4 * 4,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -442,6 +454,7 @@ impl WavefrontPathTracing {
             new_path_pipeline,
             material_pipeline,
             ray_cast_pipeline,
+            ray_cast_light_pipeline,
 
             vertex_buffer,
             index_buffer,
@@ -554,10 +567,14 @@ impl Renderer for WavefrontPathTracing {
                             timestamp_writes: None,
                         });
 
-                    compute_pass.set_pipeline(&self.ray_cast_pipeline);
                     compute_pass.set_bind_group(0, &self.scene_bind_group, &[]);
                     compute_pass.set_bind_group(1, &self.compute_bind_groups[0], &[]);
+
+                    compute_pass.set_pipeline(&self.ray_cast_pipeline);
                     compute_pass.dispatch_workgroups_indirect(&self.dispatch_args_buffers[1], 0);
+
+                    compute_pass.set_pipeline(&self.ray_cast_light_pipeline);
+                    compute_pass.dispatch_workgroups_indirect(&self.dispatch_args_buffers[1], 16);
                 }
             }
         }

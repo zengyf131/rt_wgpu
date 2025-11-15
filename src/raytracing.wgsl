@@ -192,6 +192,7 @@ fn pt_ray_color(primary_ray: Ray, rng_state: ptr<function, u32>) -> vec3<f32> {
 // Wavefront Path Tracing
 struct WavefrontRayPool {
     ray: array<Ray, 1048576>, // 2^20
+    ray_light: array<Ray, 1048576>,
     ray_id: array<u32, 1048576>,
     initialized: array<u32, 1048576>,
     terminated: array<u32, 1048576>,
@@ -202,7 +203,11 @@ struct WavefrontRayPool {
     rng_state: array<u32, 1048576>,
     rec: array<HitRecord, 1048576>,
     hit: array<u32, 1048576>,
+    do_mis: array<u32, 1048576>,
+    rec_light: array<HitRecord, 1048576>,
+    hit_light: array<u32, 1048576>,
     srec: array<BSDFRecord, 1048576>,
+    srec_light: array<BSDFRecord, 1048576>,
     ray_count: atomic<u32>,
 }
 
@@ -217,6 +222,7 @@ struct WavefrontQueues {
     new_path: array<u32, 1048576>, // 2^20
     material: array<u32, 1048576>,
     ray_cast: array<u32, 1048576>,
+    ray_cast_light: array<u32, 1048576>,
 }
 
 @group(1) @binding(0)
@@ -250,14 +256,45 @@ fn wavefront_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             atomicAdd(&wf_ray_pool.ray_count, 1u);
         }
     } else {
+        let srec = wf_ray_pool.srec[i];
+        var attenuation = wf_ray_pool.attenuation[i];
+        let do_mis = wf_ray_pool.do_mis[i];
+        if do_mis == 1u {
+            let hit_light = wf_ray_pool.hit_light[i];
+            let light_rec = wf_ray_pool.rec_light[i];
+            let rec = wf_ray_pool.rec[i];
+            let ray = wf_ray_pool.ray[i];
+            let light_ray = wf_ray_pool.ray_light[i];
+            let light_srec = wf_ray_pool.srec_light[i];
+            var rng_state = wf_ray_pool.rng_state[i];
+
+            let lid = u32(scene_metadata.light_id);
+            if hit_light == 1u && abs(light_rec.t - 1.0) <= 0.001 {
+                let light_pdf = primitive_pdf_value(lid, light_ray, light_rec, &rng_state);
+                let light_emit = material_emitted(light_rec.mat_id, light_rec);
+                let light_weight = light_pdf / (light_srec.pdf + light_pdf);
+                let light_sample = light_weight * light_srec.fs * light_emit / light_pdf;
+                wf_ray_pool.ray_color[i] += attenuation * light_sample;
+            }
+
+            var bsdf_light_rec = hit_record_new();
+            let light_hit = primitive_hit(lid, ray, Interval(0.001, INF), &bsdf_light_rec, &rng_state);
+            if light_hit && rec.t == bsdf_light_rec.t {
+                let light_pdf = primitive_pdf_value(lid, ray, bsdf_light_rec, &rng_state);
+                let bsdf_weight = srec.pdf / (srec.pdf + light_pdf);
+                attenuation *= bsdf_weight;
+            }
+        }
+
+        // Update attenuation
+        attenuation *= wf_ray_pool.srec[i].fs / srec.pdf;
+        wf_ray_pool.attenuation[i] = attenuation;
+        wf_ray_pool.depth[i] += 1u;
+        wf_ray_pool.do_mis[i] = 0u;
+
         // Requst material evaluation
         let material_index = atomicAdd(&dispatch_args[1].x, 1u);
         wf_queues.material[material_index] = gid.x;
-
-        // Update attenuation
-        let pdf_value = wf_ray_pool.srec[i].pdf;
-        wf_ray_pool.attenuation[i] *= wf_ray_pool.srec[i].fs / pdf_value;
-        wf_ray_pool.depth[i] += 1u;
     }
 }
 
@@ -277,6 +314,7 @@ fn wavefront_new_path(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ray = camera_get_ray(pixel, &rng_state);
 
     wf_ray_pool.ray[i] = ray;
+    wf_ray_pool.ray_light[i] = ray_new();
     wf_ray_pool.ray_id[i] = ray_id;
     wf_ray_pool.initialized[i] = 1u;
     wf_ray_pool.terminated[i] = 0u;
@@ -287,7 +325,11 @@ fn wavefront_new_path(@builtin(global_invocation_id) gid: vec3<u32>) {
     wf_ray_pool.rng_state[i] = rng_state;
     wf_ray_pool.rec[i] = hit_record_new();
     wf_ray_pool.hit[i] = 0u;
+    wf_ray_pool.do_mis[i] = 0u;
+    wf_ray_pool.rec_light[i] = hit_record_new();
+    wf_ray_pool.hit_light[i] = 0u;
     wf_ray_pool.srec[i] = bsdf_record_new();
+    wf_ray_pool.srec_light[i] = bsdf_record_new();
 
     // Request ray cast
     let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
@@ -311,7 +353,9 @@ fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
     let ray = camera_get_ray(pixel, &rng_state);
 
     wf_ray_pool.ray[i] = ray;
+    wf_ray_pool.ray_light[i] = ray_new();
     wf_ray_pool.ray_id[i] = ray_id;
+    wf_ray_pool.initialized[i] = 1u;
     wf_ray_pool.terminated[i] = 0u;
     wf_ray_pool.pixel[i] = pixel;
     wf_ray_pool.ray_color[i] = vec3(0.0);
@@ -320,7 +364,11 @@ fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
     wf_ray_pool.rng_state[i] = rng_state;
     wf_ray_pool.rec[i] = hit_record_new();
     wf_ray_pool.hit[i] = 0u;
+    wf_ray_pool.do_mis[i] = 0u;
+    wf_ray_pool.rec_light[i] = hit_record_new();
+    wf_ray_pool.hit_light[i] = 0u;
     wf_ray_pool.srec[i] = bsdf_record_new();
+    wf_ray_pool.srec_light[i] = bsdf_record_new();
 
     // Request ray cast
     let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
@@ -331,23 +379,42 @@ fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
 fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = wf_queues.material[gid.x];
 
-    let emission = material_emitted(wf_ray_pool.rec[i].mat_id, wf_ray_pool.rec[i]);
-
+    let ray = wf_ray_pool.ray[i];
+    let rec = wf_ray_pool.rec[i];
+    let attenuation = wf_ray_pool.attenuation[i];
+    var ray_color = wf_ray_pool.ray_color[i];
     var srec = wf_ray_pool.srec[i];
     var rng_state = wf_ray_pool.rng_state[i];
-    let bounce = material_scatter(wf_ray_pool.rec[i].mat_id, wf_ray_pool.rec[i], wf_ray_pool.ray[i].dir, &srec, &rng_state);
+
+    let emission = material_emitted(rec.mat_id, rec);
+    ray_color += attenuation * emission;
+    let bounce = material_scatter(rec.mat_id, rec, ray.dir, &srec, &rng_state);
+
+    if bounce {
+        // Request ray cast
+        let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
+        wf_queues.ray_cast[ray_cast_index] = i;
+
+        // MIS light sample
+        if scene_metadata.light_id >= 0 && material_support_eval(rec.mat_id) {
+            let lid = u32(scene_metadata.light_id);
+            let light_ray = Ray(rec.p, primitive_random(lid, &rng_state) - wf_ray_pool.rec[i].p, ray.tm);
+            let light_srec = material_eval(rec.mat_id, rec, ray.dir, light_ray.dir);
+
+            // Request ray cast light
+            wf_ray_pool.ray_light[i] = light_ray;
+            wf_ray_pool.do_mis[i] = 1u;
+            wf_ray_pool.srec_light[i] = light_srec;
+            let ray_cast_light_index = atomicAdd(&dispatch_args[1].x, 1u);
+            wf_queues.ray_cast_light[ray_cast_light_index] = i;
+        }
+    }
 
     wf_ray_pool.ray[i] = Ray(wf_ray_pool.rec[i].p, srec.wo, wf_ray_pool.ray[i].tm);
     wf_ray_pool.srec[i] = srec;
     wf_ray_pool.rng_state[i] = rng_state;
     wf_ray_pool.terminated[i] = u32(!bounce);
-    wf_ray_pool.ray_color[i] += wf_ray_pool.attenuation[i] * emission;
-
-    // Request ray cast
-    if bounce {
-        let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
-        wf_queues.ray_cast[ray_cast_index] = i;
-    }
+    wf_ray_pool.ray_color[i] = ray_color;
 }
 
 @compute @workgroup_size(256)
@@ -361,6 +428,20 @@ fn wavefront_ray_cast(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     wf_ray_pool.hit[i] = u32(hit);
     wf_ray_pool.rec[i] = rec;
+    wf_ray_pool.rng_state[i] = rng_state;
+}
+
+@compute @workgroup_size(256)
+fn wavefront_ray_cast_light(@builtin(global_invocation_id) gid: vec3<u32>) {
+    let i = wf_queues.ray_cast_light[gid.x];
+
+    var rec = hit_record_new();
+    var rng_state = wf_ray_pool.rng_state[i];
+    var hit = false;
+    hit = primitive_hit(scene_metadata.root_id, wf_ray_pool.ray_light[i], Interval(0.001, 1.001), &rec, &rng_state);
+
+    wf_ray_pool.hit_light[i] = u32(hit);
+    wf_ray_pool.rec_light[i] = rec;
     wf_ray_pool.rng_state[i] = rng_state;
 }
 
