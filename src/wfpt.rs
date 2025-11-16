@@ -1,6 +1,7 @@
 use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, CameraUniforms};
+use crate::log;
 use crate::primitive::Primitive;
 use crate::scene::Scene;
 use crate::structure::*;
@@ -35,8 +36,14 @@ pub struct WavefrontPathTracing {
     queue_buffer: wgpu::Buffer,
     dispatch_args_buffers: [wgpu::Buffer; 2],
     compute_bind_groups: [wgpu::BindGroup; 2],
+
+    staging_buffer: wgpu::Buffer,
 }
 impl WavefrontPathTracing {
+    const RAYPOOL_SIZE: wgpu::BufferAddress =
+        (32 + 32 + 4 + 4 + 4 + 8 + 16 + 4 + 16 + 4 + 48 + 4 + 4 + 48 + 4 + 32 + 32) * (1 << 20)
+            + 16;
+
     pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
@@ -291,7 +298,7 @@ impl WavefrontPathTracing {
         // log!("{:?}, {:?}", materials_raw, primitives_raw);
 
         let scene_uniforms = SceneUniforms {
-            renderer_type: 0,
+            renderer_type: 1,
             root_id,
             light_id,
         };
@@ -377,9 +384,7 @@ impl WavefrontPathTracing {
 
         let ray_pool_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ray_pool_buffer"),
-            size: (32 + 32 + 4 + 4 + 4 + 8 + 16 + 4 + 16 + 4 + 48 + 4 + 4 + 48 + 4 + 32 + 32)
-                * (1 << 20)
-                + 16,
+            size: Self::RAYPOOL_SIZE,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -396,6 +401,7 @@ impl WavefrontPathTracing {
             size: 4 * 4 * 2,
             usage: wgpu::BufferUsages::STORAGE
                 | wgpu::BufferUsages::COPY_DST
+                | wgpu::BufferUsages::COPY_SRC
                 | wgpu::BufferUsages::INDIRECT,
             mapped_at_creation: false,
         });
@@ -447,6 +453,13 @@ impl WavefrontPathTracing {
         });
         let compute_bind_groups = [compute_bind_group_0, compute_bind_group_1];
 
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("staging_buffer"),
+            size: 4 * 4 * 2,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
         Self {
             render_pipeline,
             init_pipeline,
@@ -476,6 +489,8 @@ impl WavefrontPathTracing {
             ray_pool_buffer,
             dispatch_args_buffers,
             compute_bind_groups,
+
+            staging_buffer,
         }
     }
 }
@@ -498,11 +513,17 @@ impl Renderer for WavefrontPathTracing {
         if self.camera_uniforms.frame_id * self.camera_uniforms.samples_per_frame
             < self.camera_uniforms.samples_per_pixel
         {
-            let wg = (self.camera_uniforms.image_wh[0] * self.camera_uniforms.image_wh[1])
-                .min(1 << 20)
-                .div_ceil(256);
+            let total_ray_count = self.camera_uniforms.image_wh[0]
+                * self.camera_uniforms.image_wh[1]
+                * self.camera_uniforms.samples_per_frame;
+            let init_ray_count = total_ray_count.min(1 << 20);
+            queue.write_buffer(
+                &self.ray_pool_buffer,
+                Self::RAYPOOL_SIZE - 16,
+                bytemuck::cast_slice(&[init_ray_count]),
+            );
+            let wg = init_ray_count.div_ceil(256);
             {
-                encoder.clear_buffer(&self.dispatch_args_buffers[0], 0, Some(32));
                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
                     label: Some("compute_pass"),
                     timestamp_writes: None,
@@ -521,12 +542,10 @@ impl Renderer for WavefrontPathTracing {
                 compute_pass.set_pipeline(&self.ray_cast_pipeline);
                 compute_pass.set_bind_group(0, &self.scene_bind_group, &[]);
                 compute_pass.set_bind_group(1, &self.compute_bind_groups[1], &[]);
-                compute_pass.dispatch_workgroups_indirect(&self.dispatch_args_buffers[0], 0);
+                compute_pass.dispatch_workgroups(wg, 1, 1);
             }
 
-            let max_iter = (self.camera_uniforms.image_wh[0] * self.camera_uniforms.image_wh[1])
-                .div_ceil(1 << 20)
-                * self.camera_uniforms.max_depth;
+            let max_iter = total_ray_count.div_ceil(1 << 20) * self.camera_uniforms.max_depth;
             for _i in 0..max_iter {
                 {
                     encoder.clear_buffer(&self.dispatch_args_buffers[0], 0, Some(32));
@@ -605,6 +624,26 @@ impl Renderer for WavefrontPathTracing {
         }
 
         rd.frame_id += 1;
+    }
+
+    fn print(&self, encoder: &mut wgpu::CommandEncoder) {
+        encoder.copy_buffer_to_buffer(
+            &self.dispatch_args_buffers[0],
+            0,
+            &self.staging_buffer,
+            0,
+            32,
+        );
+
+        let staging_buffer = self.staging_buffer.clone();
+        encoder.map_buffer_on_submit(&self.staging_buffer, wgpu::MapMode::Read, .., move |res| {
+            if res.is_ok() {
+                let bytes = staging_buffer.get_mapped_range(..).to_vec();
+                staging_buffer.unmap();
+                let buf: Vec<u32> = Vec::from(bytemuck::cast_slice(bytes.as_slice()));
+                log!("buf: {:?}", buf);
+            }
+        });
     }
 }
 

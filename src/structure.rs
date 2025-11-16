@@ -8,6 +8,8 @@ pub trait Renderer {
         view: &wgpu::TextureView,
         rd: &mut RenderData,
     );
+
+    fn print(&self, encoder: &mut wgpu::CommandEncoder);
 }
 
 pub struct RenderData {

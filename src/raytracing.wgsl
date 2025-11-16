@@ -215,7 +215,7 @@ struct DispatchArgs {
     x: atomic<u32>,
     y: u32,
     z: u32,
-    _pad: u32,
+    count: atomic<u32>,
 }
 
 struct WavefrontQueues {
@@ -235,48 +235,34 @@ var<storage, read_write> dispatch_args: array<DispatchArgs>;
 @compute @workgroup_size(256)
 fn wavefront_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
+    if i >= 1048576 { return; }
     if wf_ray_pool.initialized[i] == 0u {
         return;
     }
-    if wf_ray_pool.terminated[i] == 1u || wf_ray_pool.depth[i] > camera.max_depth || wf_ray_pool.hit[i] == 0u {
-        wf_ray_pool.initialized[i] = 0u;
-        if wf_ray_pool.hit[i] == 0u {
-            wf_ray_pool.ray_color[i] += wf_ray_pool.attenuation[i] * camera.background;
+
+    let srec = wf_ray_pool.srec[i];
+    var attenuation = wf_ray_pool.attenuation[i];
+    let do_mis = wf_ray_pool.do_mis[i];
+    let hit = wf_ray_pool.hit[i];
+    if do_mis == 1u {
+        let hit_light = wf_ray_pool.hit_light[i];
+        let light_rec = wf_ray_pool.rec_light[i];
+        let rec = wf_ray_pool.rec[i];
+        let ray = wf_ray_pool.ray[i];
+        let light_ray = wf_ray_pool.ray_light[i];
+        let light_srec = wf_ray_pool.srec_light[i];
+        var rng_state = wf_ray_pool.rng_state[i];
+
+        let lid = u32(scene_metadata.light_id);
+        if hit_light == 1u && abs(light_rec.t - 1.0) <= 0.001 {
+            let light_pdf = primitive_pdf_value(lid, light_ray, light_rec, &rng_state);
+            let light_emit = material_emitted(light_rec.mat_id, light_rec);
+            let light_weight = light_pdf / (light_srec.pdf + light_pdf);
+            let light_sample = light_weight * light_srec.fs * light_emit / light_pdf;
+            wf_ray_pool.ray_color[i] += attenuation * light_sample;
         }
 
-        // Accum image
-        let pixel_index = wf_ray_pool.pixel[i].x + wf_ray_pool.pixel[i].y * camera.image_wh.x;
-        accum_image[pixel_index].rgb += wf_ray_pool.ray_color[i];
-
-        // Request new primary ray
-        let ray_count = atomicLoad(&wf_ray_pool.ray_count);
-        if ray_count < camera.image_wh.x * camera.image_wh.y * camera.samples_per_frame {
-            let new_path_index = atomicAdd(&dispatch_args[0].x, 1u);
-            wf_queues.new_path[new_path_index] = gid.x;
-            atomicAdd(&wf_ray_pool.ray_count, 1u);
-        }
-    } else {
-        let srec = wf_ray_pool.srec[i];
-        var attenuation = wf_ray_pool.attenuation[i];
-        let do_mis = wf_ray_pool.do_mis[i];
-        if do_mis == 1u {
-            let hit_light = wf_ray_pool.hit_light[i];
-            let light_rec = wf_ray_pool.rec_light[i];
-            let rec = wf_ray_pool.rec[i];
-            let ray = wf_ray_pool.ray[i];
-            let light_ray = wf_ray_pool.ray_light[i];
-            let light_srec = wf_ray_pool.srec_light[i];
-            var rng_state = wf_ray_pool.rng_state[i];
-
-            let lid = u32(scene_metadata.light_id);
-            if hit_light == 1u && abs(light_rec.t - 1.0) <= 0.001 {
-                let light_pdf = primitive_pdf_value(lid, light_ray, light_rec, &rng_state);
-                let light_emit = material_emitted(light_rec.mat_id, light_rec);
-                let light_weight = light_pdf / (light_srec.pdf + light_pdf);
-                let light_sample = light_weight * light_srec.fs * light_emit / light_pdf;
-                wf_ray_pool.ray_color[i] += attenuation * light_sample;
-            }
-
+        if hit == 1u {
             var bsdf_light_rec = hit_record_new();
             let light_hit = primitive_hit(lid, ray, Interval(0.001, INF), &bsdf_light_rec, &rng_state);
             if light_hit && rec.t == bsdf_light_rec.t {
@@ -286,14 +272,51 @@ fn wavefront_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
             }
         }
 
-        // Update attenuation
-        attenuation *= wf_ray_pool.srec[i].fs / srec.pdf;
+        wf_ray_pool.rng_state[i] = rng_state;
+    }
+
+    var ray_color = wf_ray_pool.ray_color[i];
+    var finish_path = false;
+    if (wf_ray_pool.terminated[i] == 1u) || (wf_ray_pool.depth[i] > camera.max_depth) {
+        finish_path = true;
+    }
+    if !finish_path && (hit == 0u) {
+        finish_path = true;
+        ray_color += attenuation * srec.fs / srec.pdf * camera.background;
+    }
+    if finish_path {
+        wf_ray_pool.initialized[i] = 0u;
+
+        // Accum image
+        let pixel_index = wf_ray_pool.pixel[i].x + wf_ray_pool.pixel[i].y * camera.image_wh.x;
+        accum_image[pixel_index].rgb += ray_color;
+
+        // Request new primary ray
+        let ray_count = atomicAdd(&wf_ray_pool.ray_count, 1u);
+        if ray_count < camera.image_wh.x * camera.image_wh.y * camera.samples_per_frame {
+            wf_ray_pool.ray_id[i] = ray_count;
+            let new_path_index = atomicAdd(&dispatch_args[0].count, 1u);
+            if new_path_index % 256 == 0u {
+                atomicAdd(&dispatch_args[0].x, 1u);
+                dispatch_args[0].y = 1u;
+                dispatch_args[0].z = 1u;
+            }
+            wf_queues.new_path[new_path_index] = i;
+        }
+    } else {
+        // Update ray info
+        attenuation *= srec.fs / srec.pdf;
         wf_ray_pool.attenuation[i] = attenuation;
         wf_ray_pool.depth[i] += 1u;
         wf_ray_pool.do_mis[i] = 0u;
 
         // Requst material evaluation
-        let material_index = atomicAdd(&dispatch_args[1].x, 1u);
+        let material_index = atomicAdd(&dispatch_args[1].count, 1u);
+        if material_index % 256 == 0u {
+            atomicAdd(&dispatch_args[1].x, 1u);
+            dispatch_args[1].y = 1u;
+            dispatch_args[1].z = 1u;
+        }
         wf_queues.material[material_index] = gid.x;
     }
 }
@@ -332,7 +355,12 @@ fn wavefront_new_path(@builtin(global_invocation_id) gid: vec3<u32>) {
     wf_ray_pool.srec_light[i] = bsdf_record_new();
 
     // Request ray cast
-    let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
+    let ray_cast_index = atomicAdd(&dispatch_args[0].count, 1u);
+    if ray_cast_index % 256 == 0u {
+        atomicAdd(&dispatch_args[0].x, 1u);
+        dispatch_args[0].y = 1u;
+        dispatch_args[0].z = 1u;
+    }
     wf_queues.ray_cast[ray_cast_index] = i;
 }
 
@@ -340,8 +368,13 @@ fn wavefront_new_path(@builtin(global_invocation_id) gid: vec3<u32>) {
 @compute @workgroup_size(256)
 fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
     let i = gid.x;
+    if i >= 1048576 { return; }
 
-    let ray_id = wf_ray_pool.ray_id[i];
+    let ray_id = i;
+    if ray_id >= camera.samples_per_frame * camera.image_wh.x * camera.image_wh.y {
+        wf_ray_pool.initialized[i] = 0u;
+        return;
+    }
     let pixel_index = ray_id / camera.samples_per_frame;
     let pixel = vec2(
         pixel_index % camera.image_wh.x,
@@ -371,8 +404,7 @@ fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
     wf_ray_pool.srec_light[i] = bsdf_record_new();
 
     // Request ray cast
-    let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
-    wf_queues.ray_cast[ray_cast_index] = i;
+    wf_queues.ray_cast[i] = i;
 }
 
 @compute @workgroup_size(256)
@@ -381,40 +413,48 @@ fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
 
     let ray = wf_ray_pool.ray[i];
     let rec = wf_ray_pool.rec[i];
-    let attenuation = wf_ray_pool.attenuation[i];
-    var ray_color = wf_ray_pool.ray_color[i];
-    var srec = wf_ray_pool.srec[i];
     var rng_state = wf_ray_pool.rng_state[i];
 
     let emission = material_emitted(rec.mat_id, rec);
-    ray_color += attenuation * emission;
+    wf_ray_pool.ray_color[i] += wf_ray_pool.attenuation[i] * emission;
+
+    var srec = bsdf_record_new();
     let bounce = material_scatter(rec.mat_id, rec, ray.dir, &srec, &rng_state);
 
     if bounce {
         // Request ray cast
-        let ray_cast_index = atomicAdd(&dispatch_args[0].x, 1u);
+        wf_ray_pool.ray[i] = Ray(rec.p, srec.wo, ray.tm);
+        wf_ray_pool.srec[i] = srec;
+        let ray_cast_index = atomicAdd(&dispatch_args[0].count, 1u);
+        if ray_cast_index % 256 == 0u {
+            atomicAdd(&dispatch_args[0].x, 1u);
+            dispatch_args[0].y = 1u;
+            dispatch_args[0].z = 1u;
+        }
         wf_queues.ray_cast[ray_cast_index] = i;
 
         // MIS light sample
         if scene_metadata.light_id >= 0 && material_support_eval(rec.mat_id) {
             let lid = u32(scene_metadata.light_id);
-            let light_ray = Ray(rec.p, primitive_random(lid, &rng_state) - wf_ray_pool.rec[i].p, ray.tm);
+            let light_ray = Ray(rec.p, primitive_random(lid, &rng_state) - rec.p, ray.tm);
             let light_srec = material_eval(rec.mat_id, rec, ray.dir, light_ray.dir);
 
             // Request ray cast light
             wf_ray_pool.ray_light[i] = light_ray;
             wf_ray_pool.do_mis[i] = 1u;
             wf_ray_pool.srec_light[i] = light_srec;
-            let ray_cast_light_index = atomicAdd(&dispatch_args[1].x, 1u);
+            let ray_cast_light_index = atomicAdd(&dispatch_args[1].count, 1u);
+            if ray_cast_light_index % 256 == 0u {
+                atomicAdd(&dispatch_args[1].x, 1u);
+                dispatch_args[1].y = 1u;
+                dispatch_args[1].z = 1u;
+            }
             wf_queues.ray_cast_light[ray_cast_light_index] = i;
         }
     }
 
-    wf_ray_pool.ray[i] = Ray(wf_ray_pool.rec[i].p, srec.wo, wf_ray_pool.ray[i].tm);
-    wf_ray_pool.srec[i] = srec;
     wf_ray_pool.rng_state[i] = rng_state;
     wf_ray_pool.terminated[i] = u32(!bounce);
-    wf_ray_pool.ray_color[i] = ray_color;
 }
 
 @compute @workgroup_size(256)
@@ -933,8 +973,17 @@ fn material_scatter(
     switch mat.type_id {
         case 0u: { // lambertian
             let uvw = onb_new(rec.normal);
-            var scatter_direction = normalize(onb_transform(uvw, random_cosine_direction(rng_state)));
-            let pdf = dot(uvw.w, scatter_direction) / PI;
+            var scatter_direction = onb_transform(uvw, random_cosine_direction(rng_state));
+            if vec3_near_zero(scatter_direction) {
+                scatter_direction = rec.normal;
+            } else {
+                scatter_direction = normalize(scatter_direction);
+            }
+            var pdf = dot(uvw.w, scatter_direction) / PI;
+            let bignum = 10000.0;
+            if min(pdf, bignum) != pdf {
+                pdf = 1.0;
+            }
 
             (*srec).fs = texture_value(u32(mat.tex_id), rec.uv, rec.p) * pdf;
             (*srec).wo = scatter_direction;

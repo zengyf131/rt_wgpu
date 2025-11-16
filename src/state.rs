@@ -41,7 +41,7 @@ impl State {
     // We don't need this to be async right now,
     // but we will in the next tutorial
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let mut scene = cornell_box();
+        let mut scene = final_scene();
 
         let image_width = scene.camera.image_width;
         let image_height = scene.camera.image_height;
@@ -115,8 +115,8 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        let renderer = Box::new(PathTracing::new(&device, &config, &mut scene));
-        // let renderer = Box::new(WavefrontPathTracing::new(&device, &config, &mut scene));
+        // let renderer = Box::new(PathTracing::new(&device, &config, &mut scene));
+        let renderer = Box::new(WavefrontPathTracing::new(&device, &config, &mut scene));
         let egui_renderer = EguiRenderer::new(&device, config.format, window.clone());
 
         Ok(Self {
@@ -210,6 +210,16 @@ impl State {
         // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
+
+        // if self.render_data.frame_id == 1 {
+        //     let mut encoder = self
+        //         .device
+        //         .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+        //             label: Some("Render Encoder"),
+        //         });
+        //     self.renderer.print(&mut encoder, &self.queue);
+        //     self.queue.submit(std::iter::once(encoder.finish()));
+        // }
 
         Ok(())
     }

@@ -554,7 +554,7 @@ pub fn final_scene() -> Scene {
         background: vec3(0.0, 0.0, 0.0),
     };
 
-    let mut rng = rand::rng();
+    let mut rng = StdRng::seed_from_u64(0);
 
     let mut boxes1 = Box::new(PrimitiveList::new());
     let ground = Rc::new(RefCell::new(Lambertian::from_color(vec3(0.48, 0.83, 0.53))));
@@ -581,7 +581,7 @@ pub fn final_scene() -> Scene {
         vec3(123.0, 554.0, 147.0),
         vec3(300.0, 0.0, 0.0),
         vec3(0.0, 0.0, 265.0),
-        light,
+        light.clone(),
     )));
 
     let center1 = vec3(400.0, 400.0, 200.0);
@@ -671,10 +671,17 @@ pub fn final_scene() -> Scene {
         vec3(-100.0, 270.0, 395.0),
     )));
 
+    let lights = Box::new(Quad::new(
+        vec3(123.0, 554.0, 147.0),
+        vec3(300.0, 0.0, 0.0),
+        vec3(0.0, 0.0, 265.0),
+        light.clone(),
+    ));
+
     Scene {
         camera,
         world,
-        lights: None,
+        lights: Some(lights),
     }
 }
 

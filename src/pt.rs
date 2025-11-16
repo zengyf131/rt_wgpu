@@ -333,6 +333,8 @@ impl Renderer for PathTracing {
 
         rd.frame_id += 1;
     }
+
+    fn print(&self, encoder: &mut wgpu::CommandEncoder) {}
 }
 
 #[repr(C)]
