@@ -215,7 +215,7 @@ struct DispatchArgs {
     x: atomic<u32>,
     y: u32,
     z: u32,
-    count: atomic<u32>,
+    _pad: u32,
 }
 
 struct WavefrontQueues {
@@ -223,6 +223,10 @@ struct WavefrontQueues {
     material: array<u32, 1048576>,
     ray_cast: array<u32, 1048576>,
     ray_cast_light: array<u32, 1048576>,
+    new_path_len: atomic<u32>,
+    material_len: atomic<u32>,
+    ray_cast_len: atomic<u32>,
+    ray_cast_light_len: atomic<u32>,
 }
 
 @group(1) @binding(0)
@@ -295,7 +299,7 @@ fn wavefront_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
         let ray_count = atomicAdd(&wf_ray_pool.ray_count, 1u);
         if ray_count < camera.image_wh.x * camera.image_wh.y * camera.samples_per_frame {
             wf_ray_pool.ray_id[i] = ray_count;
-            let new_path_index = atomicAdd(&dispatch_args[0].count, 1u);
+            let new_path_index = atomicAdd(&wf_queues.new_path_len, 1u);
             if new_path_index % 256 == 0u {
                 atomicAdd(&dispatch_args[0].x, 1u);
                 dispatch_args[0].y = 1u;
@@ -311,7 +315,7 @@ fn wavefront_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
         wf_ray_pool.do_mis[i] = 0u;
 
         // Requst material evaluation
-        let material_index = atomicAdd(&dispatch_args[1].count, 1u);
+        let material_index = atomicAdd(&wf_queues.material_len, 1u);
         if material_index % 256 == 0u {
             atomicAdd(&dispatch_args[1].x, 1u);
             dispatch_args[1].y = 1u;
@@ -323,6 +327,9 @@ fn wavefront_logic(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(256)
 fn wavefront_new_path(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= atomicLoad(&wf_queues.new_path_len) {
+        return;
+    }
     let i = wf_queues.new_path[gid.x];
 
     let ray_id = wf_ray_pool.ray_id[i];
@@ -355,7 +362,7 @@ fn wavefront_new_path(@builtin(global_invocation_id) gid: vec3<u32>) {
     wf_ray_pool.srec_light[i] = bsdf_record_new();
 
     // Request ray cast
-    let ray_cast_index = atomicAdd(&dispatch_args[0].count, 1u);
+    let ray_cast_index = atomicAdd(&wf_queues.ray_cast_len, 1u);
     if ray_cast_index % 256 == 0u {
         atomicAdd(&dispatch_args[0].x, 1u);
         dispatch_args[0].y = 1u;
@@ -409,6 +416,9 @@ fn wavefront_init(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(256)
 fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= atomicLoad(&wf_queues.material_len) {
+        return;
+    }
     let i = wf_queues.material[gid.x];
 
     let ray = wf_ray_pool.ray[i];
@@ -425,7 +435,7 @@ fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
         // Request ray cast
         wf_ray_pool.ray[i] = Ray(rec.p, srec.wo, ray.tm);
         wf_ray_pool.srec[i] = srec;
-        let ray_cast_index = atomicAdd(&dispatch_args[0].count, 1u);
+        let ray_cast_index = atomicAdd(&wf_queues.ray_cast_len, 1u);
         if ray_cast_index % 256 == 0u {
             atomicAdd(&dispatch_args[0].x, 1u);
             dispatch_args[0].y = 1u;
@@ -443,7 +453,7 @@ fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
             wf_ray_pool.ray_light[i] = light_ray;
             wf_ray_pool.do_mis[i] = 1u;
             wf_ray_pool.srec_light[i] = light_srec;
-            let ray_cast_light_index = atomicAdd(&dispatch_args[1].count, 1u);
+            let ray_cast_light_index = atomicAdd(&wf_queues.ray_cast_light_len, 1u);
             if ray_cast_light_index % 256 == 0u {
                 atomicAdd(&dispatch_args[1].x, 1u);
                 dispatch_args[1].y = 1u;
@@ -459,6 +469,9 @@ fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(256)
 fn wavefront_ray_cast(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= atomicLoad(&wf_queues.ray_cast_len) {
+        return;
+    }
     let i = wf_queues.ray_cast[gid.x];
 
     var rec = hit_record_new();
@@ -473,6 +486,9 @@ fn wavefront_ray_cast(@builtin(global_invocation_id) gid: vec3<u32>) {
 
 @compute @workgroup_size(256)
 fn wavefront_ray_cast_light(@builtin(global_invocation_id) gid: vec3<u32>) {
+    if gid.x >= atomicLoad(&wf_queues.ray_cast_light_len) {
+        return;
+    }
     let i = wf_queues.ray_cast_light[gid.x];
 
     var rec = hit_record_new();
@@ -980,10 +996,6 @@ fn material_scatter(
                 scatter_direction = normalize(scatter_direction);
             }
             var pdf = dot(uvw.w, scatter_direction) / PI;
-            let bignum = 10000.0;
-            if min(pdf, bignum) != pdf {
-                pdf = 1.0;
-            }
 
             (*srec).fs = texture_value(u32(mat.tex_id), rec.uv, rec.p) * pdf;
             (*srec).wo = scatter_direction;
@@ -1302,6 +1314,14 @@ fn trilinear_interp(c: array<vec3<f32>, 8>, uvw: vec3<f32>) -> f32 {
     }
 
     return accum;
+}
+
+fn vec3_is_nan(v: vec3<f32>) -> bool {
+    let bignum = vec3(10000.0);
+    if (min(v.x, bignum.x) != v.x) || (min(v.y, bignum.y) != v.y) || (min(v.z, bignum.z) != v.z) {
+        return true;
+    }
+    return false;
 }
 
 // Random

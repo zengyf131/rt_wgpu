@@ -40,9 +40,10 @@ pub struct WavefrontPathTracing {
     staging_buffer: wgpu::Buffer,
 }
 impl WavefrontPathTracing {
-    const RAYPOOL_SIZE: wgpu::BufferAddress =
+    const RAYPOOL_BUFFER_SIZE: wgpu::BufferAddress =
         (32 + 32 + 4 + 4 + 4 + 8 + 16 + 4 + 16 + 4 + 48 + 4 + 4 + 48 + 4 + 32 + 32) * (1 << 20)
             + 16;
+    const QUEUE_BUFFER_SIZE: wgpu::BufferAddress = (1 << 20) * 4 * 4 + 4 * 4;
 
     pub fn new(
         device: &wgpu::Device,
@@ -384,14 +385,14 @@ impl WavefrontPathTracing {
 
         let ray_pool_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("ray_pool_buffer"),
-            size: Self::RAYPOOL_SIZE,
+            size: Self::RAYPOOL_BUFFER_SIZE,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
 
         let queue_buffer = device.create_buffer(&wgpu::BufferDescriptor {
             label: Some("queue_buffer"),
-            size: (1 << 20) * 4 * 4,
+            size: Self::QUEUE_BUFFER_SIZE,
             usage: wgpu::BufferUsages::STORAGE | wgpu::BufferUsages::COPY_DST,
             mapped_at_creation: false,
         });
@@ -519,9 +520,15 @@ impl Renderer for WavefrontPathTracing {
             let init_ray_count = total_ray_count.min(1 << 20);
             queue.write_buffer(
                 &self.ray_pool_buffer,
-                Self::RAYPOOL_SIZE - 16,
+                Self::RAYPOOL_BUFFER_SIZE - 16,
                 bytemuck::cast_slice(&[init_ray_count]),
             );
+            queue.write_buffer(
+                &self.queue_buffer,
+                Self::QUEUE_BUFFER_SIZE - 16,
+                bytemuck::cast_slice(&[0_u32, 0, 1 << 20, 0]),
+            );
+
             let wg = init_ray_count.div_ceil(256);
             {
                 let mut compute_pass = encoder.begin_compute_pass(&wgpu::ComputePassDescriptor {
@@ -547,6 +554,7 @@ impl Renderer for WavefrontPathTracing {
 
             let max_iter = total_ray_count.div_ceil(1 << 20) * self.camera_uniforms.max_depth;
             for _i in 0..max_iter {
+                encoder.clear_buffer(&self.queue_buffer, Self::QUEUE_BUFFER_SIZE - 16, Some(16));
                 {
                     encoder.clear_buffer(&self.dispatch_args_buffers[0], 0, Some(32));
                     let mut compute_pass =
