@@ -7,13 +7,19 @@ use crate::scene::Scene;
 use crate::structure::*;
 use crate::utils::*;
 
-pub struct PathTracing {
-    render_pipeline: wgpu::RenderPipeline,
+pub struct PrintTexture {
+    print_pipeline: wgpu::RenderPipeline,
     vertex_buffer: wgpu::Buffer,
     index_buffer: wgpu::Buffer,
     num_indices: u32,
+
+    print_bind_group_layout: wgpu::BindGroupLayout,
+    render_texture: Option<wgpu::Texture>,
+    render_view: Option<wgpu::TextureView>,
+    render_sampler: Option<wgpu::Sampler>,
+    print_bind_group: Option<wgpu::BindGroup>,
 }
-impl PathTracing {
+impl PrintTexture {
     pub fn new(
         device: &wgpu::Device,
         config: &wgpu::SurfaceConfiguration,
@@ -24,25 +30,47 @@ impl PathTracing {
             source: wgpu::ShaderSource::Wgsl(include_str!("raytracing.wgsl").into()),
         });
 
-        let render_pipeline_layout =
+        let print_bind_group_layout =
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor {
+                entries: &[
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 0,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable: true },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        count: None,
+                    },
+                    wgpu::BindGroupLayoutEntry {
+                        binding: 1,
+                        visibility: wgpu::ShaderStages::FRAGMENT,
+                        ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                        count: None,
+                    },
+                ],
+                label: Some("print_bind_group_layout"),
+            });
+        let print_pipeline_layout =
             device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
-                label: Some("Render Pipeline Layout"),
-                bind_group_layouts: &[scene_bind_group_layout],
+                label: Some("Print Pipeline Layout"),
+                bind_group_layouts: &[scene_bind_group_layout, &print_bind_group_layout],
                 push_constant_ranges: &[],
             });
 
-        let render_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
-            label: Some("Render Pipeline"),
-            layout: Some(&render_pipeline_layout),
+        let print_pipeline = device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
+            label: Some("Print Pipeline"),
+            layout: Some(&print_pipeline_layout),
             vertex: wgpu::VertexState {
                 module: &shader,
-                entry_point: Some("vs_render"),
+                entry_point: Some("vs_print"),
                 buffers: &[Vertex::desc()],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             },
             fragment: Some(wgpu::FragmentState {
                 module: &shader,
-                entry_point: Some("fs_render"),
+                entry_point: Some("fs_print"),
                 targets: &[Some(wgpu::ColorTargetState {
                     format: config.format,
                     blend: Some(wgpu::BlendState::REPLACE),
@@ -50,18 +78,7 @@ impl PathTracing {
                 })],
                 compilation_options: wgpu::PipelineCompilationOptions::default(),
             }),
-            primitive: wgpu::PrimitiveState {
-                topology: wgpu::PrimitiveTopology::TriangleList, // 1.
-                strip_index_format: None,
-                front_face: wgpu::FrontFace::Ccw, // 2.
-                cull_mode: Some(wgpu::Face::Back),
-                // Setting this to anything other than Fill requires Features::NON_FILL_POLYGON_MODE
-                polygon_mode: wgpu::PolygonMode::Fill,
-                // Requires Features::DEPTH_CLIP_CONTROL
-                unclipped_depth: false,
-                // Requires Features::CONSERVATIVE_RASTERIZATION
-                conservative: false,
-            },
+            primitive: wgpu::PrimitiveState::default(),
             depth_stencil: None,
             multisample: wgpu::MultisampleState {
                 count: 1,
@@ -85,14 +102,77 @@ impl PathTracing {
         let num_indices = INDICES.len() as u32;
 
         Self {
-            render_pipeline,
+            print_pipeline,
             vertex_buffer,
             index_buffer,
             num_indices,
+
+            print_bind_group_layout,
+            render_texture: None,
+            render_view: None,
+            render_sampler: None,
+            print_bind_group: None,
         }
     }
+
+    pub fn configure(
+        &mut self,
+        device: &wgpu::Device,
+        config: &wgpu::SurfaceConfiguration,
+        scene: &Scene,
+    ) {
+        let render_texture = device.create_texture(&wgpu::TextureDescriptor {
+            label: Some("render_texture"),
+            size: wgpu::Extent3d {
+                width: scene.camera.image_width,
+                height: scene.camera.image_height,
+                depth_or_array_layers: 1,
+            },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: config.format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING
+                | wgpu::TextureUsages::COPY_DST
+                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let render_view = render_texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let render_sampler = device.create_sampler(&wgpu::SamplerDescriptor {
+            address_mode_u: wgpu::AddressMode::ClampToEdge,
+            address_mode_v: wgpu::AddressMode::ClampToEdge,
+            address_mode_w: wgpu::AddressMode::ClampToEdge,
+            mag_filter: wgpu::FilterMode::Nearest,
+            min_filter: wgpu::FilterMode::Nearest,
+            mipmap_filter: wgpu::FilterMode::Nearest,
+            ..Default::default()
+        });
+        let print_bind_group = device.create_bind_group(&wgpu::BindGroupDescriptor {
+            layout: &self.print_bind_group_layout,
+            entries: &[
+                wgpu::BindGroupEntry {
+                    binding: 0,
+                    resource: wgpu::BindingResource::TextureView(&render_view),
+                },
+                wgpu::BindGroupEntry {
+                    binding: 1,
+                    resource: wgpu::BindingResource::Sampler(&render_sampler),
+                },
+            ],
+            label: Some("print_bind_group"),
+        });
+
+        self.render_texture = Some(render_texture);
+        self.render_view = Some(render_view);
+        self.render_sampler = Some(render_sampler);
+        self.print_bind_group = Some(print_bind_group);
+    }
+
+    pub fn target_view(&self) -> &wgpu::TextureView {
+        self.render_view.as_ref().unwrap()
+    }
 }
-impl Renderer for PathTracing {
+impl Renderer for PrintTexture {
     fn render(
         &mut self,
         encoder: &mut wgpu::CommandEncoder,
@@ -109,7 +189,7 @@ impl Renderer for PathTracing {
 
         {
             let mut render_pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
-                label: Some("Render Pass"),
+                label: Some("Print Pass"),
                 color_attachments: &[Some(wgpu::RenderPassColorAttachment {
                     view,
                     resolve_target: None,
@@ -124,8 +204,9 @@ impl Renderer for PathTracing {
                 timestamp_writes: None,
             });
 
-            render_pass.set_pipeline(&self.render_pipeline);
+            render_pass.set_pipeline(&self.print_pipeline);
             render_pass.set_bind_group(0, &scene.scene_bind_group, &[]);
+            render_pass.set_bind_group(1, &self.print_bind_group, &[]);
             render_pass.set_vertex_buffer(0, self.vertex_buffer.slice(..));
             render_pass.set_index_buffer(self.index_buffer.slice(..), wgpu::IndexFormat::Uint16);
             render_pass.draw_indexed(0..self.num_indices, 0, 0..1);

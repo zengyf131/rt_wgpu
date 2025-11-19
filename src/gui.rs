@@ -10,6 +10,7 @@ use winit::event::WindowEvent;
 use winit::window::Window;
 
 use crate::camera::Camera;
+use crate::scene::{Scene, SceneEnum};
 use crate::structure::*;
 
 pub struct EguiRenderer {
@@ -58,8 +59,8 @@ impl EguiRenderer {
         self.context().set_pixels_per_point(v);
     }
 
-    pub fn begin_frame(&mut self, window: Arc<Window>) {
-        let raw_input = self.state.take_egui_input(window.as_ref());
+    pub fn begin_frame(&mut self, window: &Window) {
+        let raw_input = self.state.take_egui_input(window);
         self.state.egui_ctx().begin_pass(raw_input);
         self.frame_started = true;
     }
@@ -119,53 +120,137 @@ impl EguiRenderer {
         self.frame_started = false;
     }
 
-    pub fn render(&self, rd: &mut RenderData, camera: &Camera) {
-        egui::Window::new("Ray tracing").show(self.context(), |ui| {
-            egui::Grid::new("my_grid")
-                .num_columns(1)
-                .spacing([40.0, 4.0])
-                .striped(true)
-                .show(ui, |ui| {
-                    let cur_samples = u32::min(
-                        rd.frame_id * camera.samples_per_frame,
-                        camera.samples_per_pixel,
-                    );
+    pub fn render(&self, rd: &mut RenderData, scene: &Scene) {
+        let rc = &mut rd.scene_config;
 
-                    if cur_samples < camera.samples_per_pixel {
-                        rd.timer.start();
-                        ui.label(format!(
-                            "Samples {}/{}",
-                            cur_samples, camera.samples_per_pixel
-                        ));
-                        ui.end_row();
+        match rd.render_status {
+            RenderStatus::Config => {
+                egui::Window::new("Ray tracing").show(self.context(), |ui| {
+                    egui::Grid::new("my_grid")
+                        .num_columns(2)
+                        .spacing([40.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            ui.label("Scene");
+                            ui.horizontal(|ui| {
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::ThreeSpheres,
+                                    "ThreeSpheres",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::BouncingSpheres,
+                                    "BouncingSpheres",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::SimpleLight,
+                                    "SimpleLight",
+                                );
+                            });
+                            ui.end_row();
 
-                        ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
-                        ui.end_row();
-                        ui.label(format!(
-                            "Avg frame time: {:.2}ms",
-                            rd.timer.elapsed() / (rd.frame_id as f64 - 1.0)
-                        ));
-                        // log!("Samples {}/{}", cur_samples, rd.samples_per_pixel);
-                        // log!("Render time: {}", rd.timer.elapsed() / rd.frame_id as f64);
-                    } else {
-                        rd.timer.pause();
-                        ui.label(format!(
-                            "Samples {}/{}",
-                            cur_samples, camera.samples_per_pixel
-                        ));
-                        ui.end_row();
+                            ui.label("");
+                            ui.horizontal(|ui| {
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::CornellBox,
+                                    "CornellBox",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::CornellSmoke,
+                                    "CornellSmoke",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::FinalScene,
+                                    "FinalScene",
+                                );
+                            });
+                            ui.end_row();
 
-                        ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
-                        ui.end_row();
-                        ui.label(format!(
-                            "Avg frame time: {:.2}ms",
-                            rd.timer.elapsed()
-                                / (camera.samples_per_pixel as f64
-                                    / camera.samples_per_frame as f64)
-                                    .ceil()
-                        ));
-                    }
+                            ui.label("Renderer");
+                            ui.horizontal(|ui| {
+                                ui.selectable_value(
+                                    &mut rc.renderer_type,
+                                    RendererType::PT,
+                                    "PathTracing",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.renderer_type,
+                                    RendererType::WFPT,
+                                    "Wavefront",
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.label("Multiple Importance Sampling");
+                            ui.checkbox(&mut rc.mis, "");
+                            ui.end_row();
+
+                            if ui.button("Render").clicked() {
+                                rd.update_config = true;
+                            }
+                        });
                 });
-        });
+            }
+            RenderStatus::Render => {
+                egui::Window::new("Ray tracing").show(self.context(), |ui| {
+                    egui::Grid::new("my_grid")
+                        .num_columns(1)
+                        .spacing([40.0, 4.0])
+                        .striped(true)
+                        .show(ui, |ui| {
+                            let camera = &scene.camera;
+
+                            let cur_samples = u32::min(
+                                rd.frame_id * camera.samples_per_frame,
+                                camera.samples_per_pixel,
+                            );
+
+                            if cur_samples < camera.samples_per_pixel {
+                                rd.timer.start();
+                                ui.label(format!(
+                                    "Samples {}/{}",
+                                    cur_samples, camera.samples_per_pixel
+                                ));
+                                ui.end_row();
+
+                                ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
+                                ui.end_row();
+                                ui.label(format!(
+                                    "Avg frame time: {:.2}ms",
+                                    rd.timer.elapsed() / (rd.frame_id as f64 - 1.0)
+                                ));
+                                // log!("Samples {}/{}", cur_samples, rd.samples_per_pixel);
+                                // log!("Render time: {}", rd.timer.elapsed() / rd.frame_id as f64);
+                            } else {
+                                rd.timer.pause();
+                                ui.label(format!(
+                                    "Samples {}/{}",
+                                    cur_samples, camera.samples_per_pixel
+                                ));
+                                ui.end_row();
+
+                                ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
+                                ui.end_row();
+                                ui.label(format!(
+                                    "Avg frame time: {:.2}ms",
+                                    rd.timer.elapsed()
+                                        / (camera.samples_per_pixel as f64
+                                            / camera.samples_per_frame as f64)
+                                            .ceil()
+                                ));
+                            }
+
+                            if ui.button("Config").clicked() {
+                                rd.render_status = RenderStatus::Config;
+                            }
+                        });
+                });
+            }
+        }
     }
 }

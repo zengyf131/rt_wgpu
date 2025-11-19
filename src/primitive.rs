@@ -8,55 +8,72 @@ use crate::texture::Texture;
 use crate::utils::*;
 
 pub trait Primitive {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize;
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize;
     fn aabb(&self) -> AABB;
+}
+
+#[repr(C)]
+#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
+pub struct PrimitiveRaw {
+    pub type_id: u32,
+    pub mat_id: i32,
+    pub left_child_id: i32,
+    pub right_child_id: i32,
+    pub next_elem_id: i32,
+    pub aabb: AABB,
+    pub _pad: [i32; 1],
+
+    pub data0: [f32; 4],
+    pub data1: [f32; 4],
+    pub data2: [f32; 4],
+    pub data3: [f32; 4],
+    pub data4: [f32; 4],
 }
 
 pub struct Sphere {
     center: Vec3,
     center_dir: Vec3,
     radius: f32,
-    mat: Rc<RefCell<dyn Material>>,
+    mat: Rc<dyn Material>,
     aabb: AABB,
 }
 impl Sphere {
-    pub fn sphere(center: Vec3, radius: f32, mat: Rc<RefCell<dyn Material>>) -> Self {
+    pub fn sphere(center: Vec3, radius: f32, mat: Rc<dyn Material>) -> Rc<Self> {
         let rvec = vec3(radius, radius, radius);
-        Self {
+        Rc::new(Self {
             center,
             center_dir: vec3(0.0, 0.0, 0.0),
             radius,
             mat,
             aabb: AABB::from_points(center - rvec, center + rvec),
-        }
+        })
     }
 
     pub fn sphere_moving(
         center1: Vec3,
         center2: Vec3,
         radius: f32,
-        mat: Rc<RefCell<dyn Material>>,
-    ) -> Self {
+        mat: Rc<dyn Material>,
+    ) -> Rc<Self> {
         let rvec = vec3(radius, radius, radius);
         let box1 = AABB::from_points(center1 - rvec, center1 + rvec);
         let box2 = AABB::from_points(center2 - rvec, center2 + rvec);
-        Self {
+        Rc::new(Self {
             center: center1,
             center_dir: center2 - center1,
             radius,
             mat,
             aabb: AABB::merge_aabbs(box1, box2),
-        }
+        })
     }
 }
 impl Primitive for Sphere {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
-        if self.mat.borrow().mat_id() < 0 {
-            let _ = self.mat.borrow_mut().to_raw(raw_vec);
-        }
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize {
+        let mat_id = raw_vec.register_material(&self.mat);
+
         let this_raw = PrimitiveRaw {
             type_id: 1,
-            mat_id: self.mat.borrow().mat_id(),
+            mat_id: mat_id as i32,
             left_child_id: -1,
             right_child_id: -1,
             next_elem_id: -1,
@@ -80,7 +97,7 @@ impl Primitive for Sphere {
 }
 
 pub struct PrimitiveList {
-    prim_list: Vec<Box<dyn Primitive>>,
+    prim_list: Vec<Rc<dyn Primitive>>,
     aabb: AABB,
 }
 impl PrimitiveList {
@@ -91,17 +108,24 @@ impl PrimitiveList {
         }
     }
 
+    pub fn new_rc() -> Rc<Self> {
+        Rc::new(Self {
+            prim_list: Vec::new(),
+            aabb: AABB::empty(),
+        })
+    }
+
     pub fn clear(&mut self) {
         self.prim_list.clear();
     }
 
-    pub fn add(&mut self, prim: Box<dyn Primitive>) {
+    pub fn add(&mut self, prim: Rc<dyn Primitive>) {
         self.aabb = AABB::merge_aabbs(self.aabb, prim.aabb());
         self.prim_list.push(prim);
     }
 }
 impl Primitive for PrimitiveList {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize {
         let this_pid = raw_vec.primitives.len();
         let this_raw = PrimitiveRaw {
             type_id: 0,
@@ -124,7 +148,7 @@ impl Primitive for PrimitiveList {
         let mut first_pid: usize = 0;
         let mut prev_pid: usize = 0;
         for i in 0..self.prim_list.len() {
-            let prim = &mut self.prim_list[i];
+            let prim = &self.prim_list[i];
             let pid = prim.to_raw(raw_vec);
             if i > 0 {
                 let prev_raw = &mut raw_vec.primitives[prev_pid];
@@ -146,24 +170,24 @@ impl Primitive for PrimitiveList {
 }
 
 pub struct BVHNode {
-    left: Option<Box<dyn Primitive>>,
-    right: Option<Box<dyn Primitive>>,
+    left: Option<Rc<dyn Primitive>>,
+    right: Option<Rc<dyn Primitive>>,
     aabb: AABB,
 }
 impl BVHNode {
-    pub fn from_prim_list(prim_list: PrimitiveList) -> Self {
+    pub fn from_prim_list(prim_list: PrimitiveList) -> Rc<Self> {
         Self::from_vec(prim_list.prim_list)
     }
 
-    pub fn from_vec(mut prim_vec: Vec<Box<dyn Primitive>>) -> Self {
+    pub fn from_vec(mut prim_vec: Vec<Rc<dyn Primitive>>) -> Rc<Self> {
         let mut aabb = AABB::empty();
         for prim in prim_vec.iter() {
             aabb = AABB::merge_aabbs(aabb, prim.aabb());
         }
 
         let vec_len = prim_vec.len();
-        let left: Option<Box<dyn Primitive>>;
-        let right: Option<Box<dyn Primitive>>;
+        let left: Option<Rc<dyn Primitive>>;
+        let right: Option<Rc<dyn Primitive>>;
         if vec_len == 1 {
             left = None;
             right = Some(prim_vec.pop().unwrap());
@@ -172,26 +196,25 @@ impl BVHNode {
             left = Some(prim_vec.pop().unwrap());
         } else {
             let axis: u32 = aabb.longest_axis();
-            let box_compare = |a: &Box<dyn Primitive>, b: &Box<dyn Primitive>, axis_index: u32| {
+            let box_compare = |a: &Rc<dyn Primitive>, b: &Rc<dyn Primitive>, axis_index: u32| {
                 let a_axis_interval = a.aabb().axis_interval(axis_index);
                 let b_axis_interval = b.aabb().axis_interval(axis_index);
                 return a_axis_interval.min.total_cmp(&b_axis_interval.min);
             };
-            let comparator =
-                |a: &Box<dyn Primitive>, b: &Box<dyn Primitive>| box_compare(a, b, axis);
+            let comparator = |a: &Rc<dyn Primitive>, b: &Rc<dyn Primitive>| box_compare(a, b, axis);
             prim_vec.sort_by(comparator);
 
             let mid = vec_len / 2;
             let right_vec = prim_vec.split_off(mid);
-            left = Some(Box::new(Self::from_vec(prim_vec)));
-            right = Some(Box::new(Self::from_vec(right_vec)));
+            left = Some(Self::from_vec(prim_vec));
+            right = Some(Self::from_vec(right_vec));
         }
 
-        Self { left, right, aabb }
+        Rc::new(Self { left, right, aabb })
     }
 }
 impl Primitive for BVHNode {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize {
         let this_pid = raw_vec.primitives.len();
         let this_raw = PrimitiveRaw {
             type_id: 0,
@@ -211,12 +234,12 @@ impl Primitive for BVHNode {
 
         raw_vec.primitives.push(this_raw);
 
-        let left_id = if let Some(left_child) = &mut self.left {
+        let left_id = if let Some(left_child) = &self.left {
             left_child.to_raw(raw_vec) as i32
         } else {
             -1
         };
-        let right_id = if let Some(right_child) = &mut self.right {
+        let right_id = if let Some(right_child) = &self.right {
             right_child.to_raw(raw_vec) as i32
         } else {
             -1
@@ -242,11 +265,11 @@ pub struct Quad {
     d: f32,
     w: Vec3,
     area: f32,
-    mat: Rc<RefCell<dyn Material>>,
+    mat: Rc<dyn Material>,
     aabb: AABB,
 }
 impl Quad {
-    pub fn new(q: Vec3, u: Vec3, v: Vec3, mat: Rc<RefCell<dyn Material>>) -> Self {
+    pub fn new(q: Vec3, u: Vec3, v: Vec3, mat: Rc<dyn Material>) -> Rc<Self> {
         let bbox_diagonal1 = AABB::from_points(q, q + u + v);
         let bbox_diagonal2 = AABB::from_points(q + u, q + v);
         let aabb = AABB::merge_aabbs(bbox_diagonal1, bbox_diagonal2);
@@ -257,7 +280,7 @@ impl Quad {
         let w = n / dot(n, n);
         let area = n.magnitude();
 
-        Self {
+        Rc::new(Self {
             q,
             u,
             v,
@@ -267,17 +290,16 @@ impl Quad {
             area,
             mat,
             aabb,
-        }
+        })
     }
 }
 impl Primitive for Quad {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
-        if self.mat.borrow().mat_id() < 0 {
-            let _ = self.mat.borrow_mut().to_raw(raw_vec);
-        }
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize {
+        let mat_id = raw_vec.register_material(&self.mat);
+
         let this_raw = PrimitiveRaw {
             type_id: 2,
-            mat_id: self.mat.borrow().mat_id(),
+            mat_id: mat_id as i32,
             left_child_id: -1,
             right_child_id: -1,
             next_elem_id: -1,
@@ -301,22 +323,22 @@ impl Primitive for Quad {
 }
 
 pub struct Translate {
-    object: Box<dyn Primitive>,
+    object: Rc<dyn Primitive>,
     offset: Vec3,
     aabb: AABB,
 }
 impl Translate {
-    pub fn new(object: Box<dyn Primitive>, offset: Vec3) -> Self {
+    pub fn new(object: Rc<dyn Primitive>, offset: Vec3) -> Rc<Self> {
         let aabb = object.aabb() + offset;
-        Self {
+        Rc::new(Self {
             object,
             offset,
             aabb,
-        }
+        })
     }
 }
 impl Primitive for Translate {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize {
         let this_pid = raw_vec.primitives.len();
         let this_raw = PrimitiveRaw {
             type_id: 3,
@@ -348,13 +370,13 @@ impl Primitive for Translate {
 }
 
 pub struct RotateY {
-    object: Box<dyn Primitive>,
+    object: Rc<dyn Primitive>,
     sin_theta: f32,
     cos_theta: f32,
     aabb: AABB,
 }
 impl RotateY {
-    pub fn new(object: Box<dyn Primitive>, angle: Degrees) -> Self {
+    pub fn new(object: Rc<dyn Primitive>, angle: Degrees) -> Rc<Self> {
         let sin_theta = Deg::sin(angle);
         let cos_theta = Deg::cos(angle);
         let mut aabb = object.aabb();
@@ -383,16 +405,16 @@ impl RotateY {
 
         aabb = AABB::from_points(min, max);
 
-        Self {
+        Rc::new(Self {
             object,
             sin_theta,
             cos_theta,
             aabb,
-        }
+        })
     }
 }
 impl Primitive for RotateY {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize {
         let this_pid = raw_vec.primitives.len();
         let this_raw = PrimitiveRaw {
             type_id: 4,
@@ -424,37 +446,42 @@ impl Primitive for RotateY {
 }
 
 pub struct ConstantMedium {
-    boundary: Box<dyn Primitive>,
+    boundary: Rc<dyn Primitive>,
     neg_inv_density: f32,
-    phase_function: Rc<RefCell<dyn Material>>,
+    phase_function: Rc<dyn Material>,
 }
 impl ConstantMedium {
-    pub fn new(boundary: Box<dyn Primitive>, density: f32, tex: Rc<RefCell<dyn Texture>>) -> Self {
-        Self {
+    pub fn new(boundary: Rc<dyn Primitive>, density: f32, tex: Rc<dyn Texture>) -> Rc<Self> {
+        Rc::new(Self {
             boundary,
             neg_inv_density: -1.0 / density,
-            phase_function: Rc::new(RefCell::new(Isotropic::new(tex))),
-        }
+            phase_function: Isotropic::new(tex),
+        })
     }
 
-    pub fn from_color(boundary: Box<dyn Primitive>, density: f32, albedo: Vec3) -> Self {
-        Self {
+    pub fn from_color(boundary: Rc<dyn Primitive>, density: f32, albedo: Vec3) -> Rc<Self> {
+        Rc::new(Self {
             boundary,
             neg_inv_density: -1.0 / density,
-            phase_function: Rc::new(RefCell::new(Isotropic::from_color(albedo))),
-        }
+            phase_function: Isotropic::from_color(albedo),
+        })
     }
 }
 impl Primitive for ConstantMedium {
-    fn to_raw(&mut self, raw_vec: &mut RawVec) -> usize {
-        if self.phase_function.borrow().mat_id() < 0 {
-            let _ = self.phase_function.borrow_mut().to_raw(raw_vec);
+    fn to_raw(&self, raw_vec: &mut RawVec) -> usize {
+        let mat_id: usize;
+        let mat_key = Rc::as_ptr(&self.phase_function).cast::<()>();
+        if let Some(&id) = raw_vec.materials_hash.get(&mat_key) {
+            mat_id = id;
+        } else {
+            mat_id = self.phase_function.to_raw(raw_vec);
+            raw_vec.materials_hash.insert(mat_key, mat_id);
         }
 
         let this_pid = raw_vec.primitives.len();
         let this_raw = PrimitiveRaw {
             type_id: 5,
-            mat_id: self.phase_function.borrow().mat_id(),
+            mat_id: mat_id as i32,
             left_child_id: -1,
             right_child_id: -1,
             next_elem_id: -1,

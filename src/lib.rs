@@ -7,6 +7,7 @@ mod camera;
 mod gui;
 mod material;
 mod primitive;
+mod print_texture;
 mod pt;
 mod scene;
 mod state;

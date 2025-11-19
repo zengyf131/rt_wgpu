@@ -1,7 +1,5 @@
 use std::{f32, sync::Arc};
 
-use bytemuck::bytes_of;
-use wgpu::util::DeviceExt;
 use winit::{
     application::ApplicationHandler,
     dpi::{PhysicalPosition, PhysicalSize},
@@ -14,6 +12,7 @@ use winit::{
 use crate::camera::Camera;
 use crate::gui::EguiRenderer;
 use crate::log;
+use crate::print_texture::PrintTexture;
 use crate::pt::PathTracing;
 use crate::scene::*;
 use crate::structure::*;
@@ -31,21 +30,20 @@ pub struct State {
     mouse_pos: (f64, f64),
 
     scene: Scene,
-    renderer: Box<dyn Renderer>,
     egui_renderer: EguiRenderer,
     gui_enable: bool,
     render_data: RenderData,
+
+    renderer_pt: PathTracing,
+    renderer_wfpt: WavefrontPathTracing,
+    renderer_texture: PrintTexture,
 }
 
 impl State {
     // We don't need this to be async right now,
     // but we will in the next tutorial
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let mut scene = final_scene();
-
-        let image_width = scene.camera.image_width;
-        let image_height = scene.camera.image_height;
-        let size = PhysicalSize::<u32>::new(image_width, image_height);
+        let size = PhysicalSize::<u32>::new(1920, 1080);
         let _ = window.request_inner_size(size);
 
         // The instance is a handle to our GPU
@@ -115,9 +113,13 @@ impl State {
             desired_maximum_frame_latency: 2,
         };
 
-        // let renderer = Box::new(PathTracing::new(&device, &config, &mut scene));
-        let renderer = Box::new(WavefrontPathTracing::new(&device, &config, &mut scene));
+        let scene = get_scene(&device, SceneEnum::CornellBox);
+        let scene_bind_group_layout = Scene::layout(&device);
         let egui_renderer = EguiRenderer::new(&device, config.format, window.clone());
+
+        let renderer_pt = PathTracing::new(&device, &config, &scene_bind_group_layout);
+        let renderer_wfpt = WavefrontPathTracing::new(&device, &config, &scene_bind_group_layout);
+        let renderer_texture = PrintTexture::new(&device, &config, &scene_bind_group_layout);
 
         Ok(Self {
             surface,
@@ -130,19 +132,32 @@ impl State {
             mouse_pos: (0.0, 0.0),
 
             scene,
-            renderer,
             egui_renderer,
             gui_enable: true,
             render_data: RenderData::new(),
+
+            renderer_pt,
+            renderer_wfpt,
+            renderer_texture,
         })
     }
 
     pub fn resize(&mut self, width: u32, height: u32) {
         if width > 0 && height > 0 {
-            // self.config.width = width;
-            // self.config.height = height;
+            log!("{}, {}", width, height);
+            self.config.width = width;
+            self.config.height = height;
             self.surface.configure(&self.device, &self.config);
             self.is_surface_configured = true;
+
+            self.scene
+                .scene_uniforms
+                .update(&self.config, &self.render_data);
+            self.queue.write_buffer(
+                &self.scene.scene_uniforms_buffer,
+                0,
+                bytemuck::bytes_of(&self.scene.scene_uniforms),
+            );
         }
     }
 
@@ -162,7 +177,40 @@ impl State {
         self.egui_renderer.handle_input(self.window.clone(), event);
     }
 
-    pub fn update(&mut self) {}
+    pub fn update(&mut self) {
+        if self.render_data.update_config {
+            let mut scene = get_scene(&self.device, self.render_data.scene_config.scene_enum);
+
+            // let size =
+            //     PhysicalSize::<u32>::new(scene.camera.image_width, scene.camera.image_height);
+            // if self.window.inner_size().width != size.width
+            //     || self.window.inner_size().height != size.height
+            // {
+            //     let _ = self.window.request_inner_size(size);
+            //     self.is_surface_configured = false;
+            // }
+
+            scene.scene_uniforms.update(&self.config, &self.render_data);
+            self.queue.write_buffer(
+                &scene.scene_uniforms_buffer,
+                0,
+                bytemuck::bytes_of(&scene.scene_uniforms),
+            );
+
+            match self.render_data.scene_config.renderer_type {
+                RendererType::PT => {}
+                RendererType::WFPT => {
+                    self.renderer_wfpt.configure(&self.device);
+                }
+            }
+            self.renderer_texture
+                .configure(&self.device, &self.config, &scene);
+
+            self.render_data.reset();
+            self.render_data.render_status = RenderStatus::Render;
+            self.scene = scene;
+        }
+    }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
@@ -182,20 +230,51 @@ impl State {
                 label: Some("Render Encoder"),
             });
 
-        self.renderer
-            .render(&mut encoder, &self.queue, &view, &mut self.render_data);
+        if self.render_data.render_status == RenderStatus::Render {
+            self.scene.camera_uniforms.frame_id = self.render_data.frame_id;
+
+            match self.render_data.scene_config.renderer_type {
+                RendererType::PT => {
+                    self.renderer_pt.render(
+                        &mut encoder,
+                        &self.queue,
+                        self.renderer_texture.target_view(),
+                        &self.scene,
+                        &mut self.render_data,
+                    );
+                }
+                RendererType::WFPT => {
+                    self.renderer_wfpt.render(
+                        &mut encoder,
+                        &self.queue,
+                        self.renderer_texture.target_view(),
+                        &self.scene,
+                        &mut self.render_data,
+                    );
+                }
+            }
+
+            self.renderer_texture.render(
+                &mut encoder,
+                &self.queue,
+                &view,
+                &self.scene,
+                &mut self.render_data,
+            );
+
+            self.render_data.frame_id += 1;
+        }
 
         if self.gui_enable {
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [self.config.width, self.config.height],
-                pixels_per_point: self.window.scale_factor() as f32 * self.config.width as f32
-                    / 1500.0,
+                pixels_per_point: self.window.scale_factor() as f32,
             };
 
-            self.egui_renderer.begin_frame(self.window.clone());
+            self.egui_renderer.begin_frame(&self.window);
 
             self.egui_renderer
-                .render(&mut self.render_data, &self.scene.camera);
+                .render(&mut self.render_data, &self.scene);
 
             self.egui_renderer.end_frame_and_draw(
                 &self.device,

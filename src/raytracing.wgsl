@@ -1,4 +1,3 @@
-// Vertex shader
 struct VertexInput {
     @location(0) position: vec3<f32>,
 }
@@ -7,16 +6,6 @@ struct VertexOutput {
     @builtin(position) clip_position: vec4<f32>,
 }
 
-@vertex
-fn vs_main(
-    model: VertexInput,
-) -> VertexOutput {
-    var out: VertexOutput;
-    out.clip_position = vec4<f32>(model.position, 1.0);
-    return out;
-}
-
-// Fragment shader
 @group(0) @binding(0)
 var<uniform> scene_metadata: SceneMetadata;
 
@@ -38,19 +27,67 @@ var<storage, read> texture_list: array<Texture>;
 @group(0) @binding(6)
 var<storage, read> tex_data: array<f32>;
 
+@vertex
+fn vs_render(
+    model: VertexInput,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_position = vec4<f32>(model.position, 1.0);
+    return out;
+}
+
 @fragment
-fn fs_main(in: VertexOutput) -> @location(0) vec4<f32> {
+fn fs_render(in: VertexOutput) -> @location(0) vec4<f32> {
     let pixel_loc_u32 = vec2(u32(in.clip_position.x), u32(in.clip_position.y));
     var rng_state = random_init(pixel_loc_u32, camera.image_wh, camera.frame_id);
     return camera_render_pixel(in.clip_position, &rng_state);
 }
 
-// Ray tracing part
+@group(1) @binding(0)
+var t_image: texture_2d<f32>;
+@group(1) @binding(1)
+var s_image: sampler;
 
+@vertex
+fn vs_print(
+    model: VertexInput,
+) -> VertexOutput {
+    var out: VertexOutput;
+    out.clip_position = vec4<f32>(model.position, 1.0);
+    return out;
+}
+
+@fragment
+fn fs_print(in: VertexOutput) -> @location(0) vec4<f32> {
+    var uv = in.clip_position.xy / vec2<f32>(scene_metadata.surface_wh);
+    let image_ratio = f32(camera.image_wh.x) / f32(camera.image_wh.y);
+    let surface_ratio = f32(scene_metadata.surface_wh.x) / f32(scene_metadata.surface_wh.y);
+    if image_ratio > surface_ratio {
+        uv.y -= 0.5;
+        uv.y *= image_ratio / surface_ratio;
+        uv.y += 0.5;
+        if uv.y < 0.0 || uv.y > 1.0 {
+            discard;
+        }
+    } else {
+        uv.x -= 0.5;
+        uv.x *= surface_ratio / image_ratio;
+        uv.x += 0.5;
+        if uv.x < 0.0 || uv.x > 1.0 {
+            discard;
+        }
+    }
+    let color = textureSampleLevel(t_image, s_image, uv, 0).rgb;
+    return vec4(color, 1.0);
+}
+
+// Ray tracing part
 struct SceneMetadata {
-    renderer_type: u32,
+    surface_wh: vec2<u32>,
     root_id: u32,
     light_id: i32,
+    renderer_type: u32,
+    mis: u32,
 }
 
 // Camera
@@ -73,6 +110,7 @@ struct Camera {
 
 fn camera_render_pixel(pixel_loc: vec4<f32>, rng_state: ptr<function, u32>) -> vec4<f32> {
     let pixel_loc_u32 = vec2<u32>(pixel_loc.xy);
+    if pixel_loc_u32.x >= camera.image_wh.x || pixel_loc_u32.y >= camera.image_wh.y { return vec4(0.0); }
     let pixel_index = pixel_loc_u32.x + pixel_loc_u32.y * camera.image_wh.x;
     let prev_num_samples = min(camera.frame_id * camera.samples_per_frame, camera.samples_per_pixel);
     if prev_num_samples == camera.samples_per_pixel {
@@ -155,7 +193,7 @@ fn pt_ray_color(primary_ray: Ray, rng_state: ptr<function, u32>) -> vec3<f32> {
             let b_emit = material_emitted(rec.mat_id, rec);
             if material_scatter(rec.mat_id, rec, ray.dir, &srec, rng_state) {
                 // Light importance sampling
-                if scene_metadata.light_id >= 0 && material_support_eval(rec.mat_id) {
+                if scene_metadata.mis == 1u && scene_metadata.light_id >= 0 && material_support_eval(rec.mat_id) {
                     do_mis = true;
                     mis_bsdf_pdf = srec.pdf;
                     let lid = u32(scene_metadata.light_id);
@@ -444,7 +482,7 @@ fn wavefront_material(@builtin(global_invocation_id) gid: vec3<u32>) {
         wf_queues.ray_cast[ray_cast_index] = i;
 
         // MIS light sample
-        if scene_metadata.light_id >= 0 && material_support_eval(rec.mat_id) {
+        if scene_metadata.mis == 1u && scene_metadata.light_id >= 0 && material_support_eval(rec.mat_id) {
             let lid = u32(scene_metadata.light_id);
             let light_ray = Ray(rec.p, primitive_random(lid, &rng_state) - rec.p, ray.tm);
             let light_srec = material_eval(rec.mat_id, rec, ray.dir, light_ray.dir);

@@ -1,3 +1,9 @@
+use std::{collections::HashMap, rc::Rc};
+
+use crate::material::{Material, MaterialRaw};
+use crate::primitive::{Primitive, PrimitiveRaw};
+use crate::scene::{Scene, SceneEnum};
+use crate::texture::{Texture, TextureRaw};
 use crate::utils::*;
 
 pub trait Renderer {
@@ -6,21 +12,63 @@ pub trait Renderer {
         encoder: &mut wgpu::CommandEncoder,
         queue: &wgpu::Queue,
         view: &wgpu::TextureView,
+        scene: &Scene,
         rd: &mut RenderData,
     );
 
     fn print(&self, encoder: &mut wgpu::CommandEncoder);
 }
 
+#[derive(Clone, Copy, PartialEq)]
+pub enum RendererType {
+    PT,
+    WFPT,
+}
+
 pub struct RenderData {
     pub frame_id: u32,
     pub timer: Timer,
+
+    pub update_config: bool,
+    pub render_status: RenderStatus,
+    pub scene_config: SceneConfig,
 }
 impl RenderData {
     pub fn new() -> Self {
         Self {
             frame_id: 0,
             timer: Timer::new(),
+
+            update_config: false,
+            render_status: RenderStatus::Config,
+            scene_config: SceneConfig::new(),
+        }
+    }
+
+    pub fn reset(&mut self) {
+        self.frame_id = 0;
+        self.timer.reset();
+        self.update_config = false;
+    }
+}
+
+#[derive(PartialEq)]
+pub enum RenderStatus {
+    Config,
+    Render,
+}
+
+pub struct SceneConfig {
+    pub scene_enum: SceneEnum,
+    pub renderer_type: RendererType,
+    pub mis: bool,
+}
+impl SceneConfig {
+    fn new() -> Self {
+        Self {
+            scene_enum: SceneEnum::CornellBox,
+            renderer_type: RendererType::PT,
+            mis: false,
         }
     }
 }
@@ -30,6 +78,9 @@ pub struct RawVec {
     pub materials: Vec<MaterialRaw>,
     pub textures: Vec<TextureRaw>,
     pub tex_data: Vec<f32>,
+
+    pub materials_hash: HashMap<*const (), usize>,
+    pub textures_hash: HashMap<*const (), usize>,
 }
 impl RawVec {
     pub fn new() -> Self {
@@ -38,55 +89,66 @@ impl RawVec {
             materials: Vec::new(),
             textures: Vec::new(),
             tex_data: Vec::new(),
+
+            materials_hash: HashMap::new(),
+            textures_hash: HashMap::new(),
         }
     }
-}
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
-pub struct PrimitiveRaw {
-    pub type_id: u32, // 0: bvh, 1: sphere
-    pub mat_id: i32,
-    pub left_child_id: i32,
-    pub right_child_id: i32,
-    pub next_elem_id: i32,
-    pub aabb: AABB,
-    pub _pad: [i32; 1],
+    pub fn register_material(&mut self, mat: &Rc<dyn Material>) -> usize {
+        let mat_id: usize;
+        let mat_key = Rc::as_ptr(mat).cast::<()>();
+        if let Some(&id) = self.materials_hash.get(&mat_key) {
+            mat_id = id;
+        } else {
+            mat_id = mat.to_raw(self);
+            self.materials_hash.insert(mat_key, mat_id);
+        }
 
-    pub data0: [f32; 4],
-    pub data1: [f32; 4],
-    pub data2: [f32; 4],
-    pub data3: [f32; 4],
-    pub data4: [f32; 4],
-}
+        mat_id
+    }
 
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
-pub struct MaterialRaw {
-    pub type_id: u32,
-    pub tex_id: i32,
-    pub _pad0: [u32; 2],
+    pub fn register_texture(&mut self, tex: &Rc<dyn Texture>) -> usize {
+        let tex_id: usize;
+        let tex_key = Rc::as_ptr(tex).cast::<()>();
+        if let Some(&id) = self.textures_hash.get(&tex_key) {
+            tex_id = id;
+        } else {
+            tex_id = tex.to_raw(self);
+            self.textures_hash.insert(tex_key, tex_id);
+        }
 
-    pub data0: [f32; 4],
-}
-
-#[repr(C)]
-#[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable, Debug)]
-pub struct TextureRaw {
-    pub type_id: u32,
-    pub start: u32,
-    pub end: u32,
-    pub _pad0: [u32; 1],
-
-    pub data0: [f32; 4],
+        tex_id
+    }
 }
 
 #[repr(C)]
 #[derive(Clone, Copy, bytemuck::Pod, bytemuck::Zeroable)]
 pub struct SceneUniforms {
-    pub renderer_type: u32,
+    pub surface_wh: [u32; 2],
     pub root_id: u32,
     pub light_id: i32,
+    pub renderer_type: u32,
+    pub mis: u32,
+    pub _pad0: [u32; 2],
+}
+impl SceneUniforms {
+    pub fn from_scene(root_id: u32, light_id: i32) -> Self {
+        Self {
+            surface_wh: [0, 0],
+            root_id,
+            light_id,
+            renderer_type: 0,
+            mis: 0,
+            _pad0: [0; 2],
+        }
+    }
+
+    pub fn update(&mut self, config: &wgpu::SurfaceConfiguration, rd: &RenderData) {
+        self.surface_wh = [config.width, config.height];
+        self.renderer_type = rd.scene_config.renderer_type as u32;
+        self.mis = rd.scene_config.mis as u32;
+    }
 }
 
 #[repr(C)]
