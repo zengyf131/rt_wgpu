@@ -2,7 +2,7 @@
 
 use std::sync::Arc;
 
-use egui::Context;
+use egui::{Context, Slider};
 use egui_wgpu::wgpu::{CommandEncoder, Device, Queue, StoreOp, TextureFormat, TextureView};
 use egui_wgpu::{Renderer, RendererOptions, ScreenDescriptor, wgpu};
 use egui_winit::State;
@@ -186,8 +186,28 @@ impl EguiRenderer {
                             });
                             ui.end_row();
 
-                            ui.label("Multiple Importance Sampling");
-                            ui.checkbox(&mut rc.mis, "");
+                            ui.label("Sampling Strategy");
+                            ui.horizontal(|ui| {
+                                ui.selectable_value(
+                                    &mut rc.sampling_type,
+                                    SamplingStrategy::BSDF,
+                                    "Material",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.sampling_type,
+                                    SamplingStrategy::Light,
+                                    "Light",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.sampling_type,
+                                    SamplingStrategy::MIS,
+                                    "Multiple Importance Sampling",
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.label("Samples Per Pixel");
+                            ui.add(Slider::new(&mut rc.samples_per_pixel, 0..=1000));
                             ui.end_row();
 
                             if ui.button("Render").clicked() {

@@ -1,4 +1,5 @@
 use std::{collections::HashMap, rc::Rc};
+use winit::event::MouseButton;
 
 use crate::material::{Material, MaterialRaw};
 use crate::primitive::{Primitive, PrimitiveRaw};
@@ -19,12 +20,6 @@ pub trait Renderer {
     fn print(&self, encoder: &mut wgpu::CommandEncoder);
 }
 
-#[derive(Clone, Copy, PartialEq)]
-pub enum RendererType {
-    PT,
-    WFPT,
-}
-
 pub struct RenderData {
     pub frame_id: u32,
     pub timer: Timer,
@@ -32,6 +27,11 @@ pub struct RenderData {
     pub update_config: bool,
     pub render_status: RenderStatus,
     pub scene_config: SceneConfig,
+
+    pub mouse_pressed: bool,
+    pub mouse_key: MouseButton,
+    pub mouse_prev_pos: Option<Vec2>,
+    pub image_dirty: bool,
 }
 impl RenderData {
     pub fn new() -> Self {
@@ -42,6 +42,11 @@ impl RenderData {
             update_config: false,
             render_status: RenderStatus::Config,
             scene_config: SceneConfig::new(),
+
+            mouse_pressed: false,
+            mouse_key: MouseButton::Left,
+            mouse_prev_pos: None,
+            image_dirty: false,
         }
     }
 
@@ -49,6 +54,8 @@ impl RenderData {
         self.frame_id = 0;
         self.timer.reset();
         self.update_config = false;
+        self.mouse_pressed = false;
+        self.mouse_prev_pos = None;
     }
 }
 
@@ -61,16 +68,31 @@ pub enum RenderStatus {
 pub struct SceneConfig {
     pub scene_enum: SceneEnum,
     pub renderer_type: RendererType,
-    pub mis: bool,
+    pub sampling_type: SamplingStrategy,
+    pub samples_per_pixel: u32,
 }
 impl SceneConfig {
     fn new() -> Self {
         Self {
             scene_enum: SceneEnum::CornellBox,
             renderer_type: RendererType::PT,
-            mis: false,
+            sampling_type: SamplingStrategy::BSDF,
+            samples_per_pixel: 0,
         }
     }
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum RendererType {
+    PT,
+    WFPT,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub enum SamplingStrategy {
+    BSDF,
+    Light,
+    MIS,
 }
 
 pub struct RawVec {
@@ -129,7 +151,7 @@ pub struct SceneUniforms {
     pub root_id: u32,
     pub light_id: i32,
     pub renderer_type: u32,
-    pub mis: u32,
+    pub sampling_type: u32,
     pub _pad0: [u32; 2],
 }
 impl SceneUniforms {
@@ -139,7 +161,7 @@ impl SceneUniforms {
             root_id,
             light_id,
             renderer_type: 0,
-            mis: 0,
+            sampling_type: 0,
             _pad0: [0; 2],
         }
     }
@@ -147,7 +169,7 @@ impl SceneUniforms {
     pub fn update(&mut self, config: &wgpu::SurfaceConfiguration, rd: &RenderData) {
         self.surface_wh = [config.width, config.height];
         self.renderer_type = rd.scene_config.renderer_type as u32;
-        self.mis = rd.scene_config.mis as u32;
+        self.sampling_type = rd.scene_config.sampling_type as u32;
     }
 }
 

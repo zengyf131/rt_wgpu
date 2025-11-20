@@ -16,6 +16,7 @@ use crate::print_texture::PrintTexture;
 use crate::pt::PathTracing;
 use crate::scene::*;
 use crate::structure::*;
+use crate::utils::*;
 use crate::wfpt::WavefrontPathTracing;
 
 // This will store the state of our game
@@ -170,7 +171,61 @@ impl State {
     }
 
     pub fn handle_mouse_moved(&mut self, position: PhysicalPosition<f64>) {
-        self.mouse_pos = (position.x, position.y);
+        let current_pos = vec2(position.x as f32, position.y as f32);
+        if self.render_data.mouse_pressed {
+            if let Some(prev_pos) = self.render_data.mouse_prev_pos {
+                let movement = current_pos - prev_pos;
+                let mut moved = false;
+                match self.render_data.mouse_key {
+                    MouseButton::Middle => {
+                        self.scene.camera.translate(movement);
+                        moved = true;
+                    }
+                    MouseButton::Right => {
+                        self.scene.camera.orbit(movement);
+                        moved = true;
+                    }
+                    _ => {}
+                }
+                if moved {
+                    self.scene.camera_uniforms = self.scene.camera.to_raw();
+                    self.render_data.frame_id = 0;
+                    self.render_data.timer.reset();
+                    self.render_data.image_dirty = true;
+                    self.render_data.mouse_prev_pos = Some(current_pos);
+                }
+            } else {
+                self.render_data.mouse_prev_pos = Some(current_pos);
+            }
+        }
+    }
+
+    pub fn handle_mouse_input(&mut self, mouse_state: ElementState, button: MouseButton) {
+        if self.render_data.render_status == RenderStatus::Render {
+            if mouse_state == ElementState::Pressed {
+                if !self.egui_renderer.context().is_pointer_over_area() {
+                    self.render_data.mouse_pressed = true;
+                    self.render_data.mouse_key = button;
+                }
+            } else {
+                if self.render_data.mouse_pressed && self.render_data.mouse_key == button {
+                    self.render_data.mouse_pressed = false;
+                    self.render_data.mouse_prev_pos = None;
+                }
+            }
+        }
+    }
+
+    pub fn handle_mouse_wheel(&mut self, delta: MouseScrollDelta, phase: TouchPhase) {
+        if self.render_data.render_status == RenderStatus::Render {
+            if let MouseScrollDelta::PixelDelta(p_delta) = delta {
+                self.scene.camera.zoom(p_delta.y as f32);
+                self.scene.camera_uniforms = self.scene.camera.to_raw();
+                self.render_data.frame_id = 0;
+                self.render_data.timer.reset();
+                self.render_data.image_dirty = true;
+            }
+        }
     }
 
     pub fn handle_gui(&mut self, event: &WindowEvent) {
@@ -196,6 +251,16 @@ impl State {
                 0,
                 bytemuck::bytes_of(&scene.scene_uniforms),
             );
+
+            if self.render_data.scene_config.samples_per_pixel > 0 {
+                scene.camera.samples_per_pixel = self.render_data.scene_config.samples_per_pixel;
+                scene.camera_uniforms = scene.camera.to_raw();
+                self.queue.write_buffer(
+                    &scene.camera_uniforms_buffer,
+                    0,
+                    bytemuck::bytes_of(&scene.camera_uniforms),
+                );
+            }
 
             match self.render_data.scene_config.renderer_type {
                 RendererType::PT => {}
@@ -232,6 +297,10 @@ impl State {
 
         if self.render_data.render_status == RenderStatus::Render {
             self.scene.camera_uniforms.frame_id = self.render_data.frame_id;
+            if self.render_data.image_dirty {
+                encoder.clear_buffer(&self.scene.accum_pixel_buffer, 0, None);
+                self.render_data.image_dirty = false;
+            }
 
             match self.render_data.scene_config.renderer_type {
                 RendererType::PT => {

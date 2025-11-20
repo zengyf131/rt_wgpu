@@ -134,6 +134,16 @@ impl ApplicationHandler<State> for App {
                 ..
             } => state.handle_key(event_loop, code, key_state.is_pressed()),
             WindowEvent::CursorMoved { position, .. } => state.handle_mouse_moved(position),
+            WindowEvent::MouseInput {
+                device_id,
+                state: mouse_state,
+                button,
+            } => state.handle_mouse_input(mouse_state, button),
+            WindowEvent::MouseWheel {
+                device_id,
+                delta,
+                phase,
+            } => state.handle_mouse_wheel(delta, phase),
             _ => {}
         }
     }

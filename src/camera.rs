@@ -61,6 +61,43 @@ impl Camera {
             background: [self.background.x, self.background.y, self.background.z, 0.0],
         }
     }
+
+    pub fn translate(&mut self, mouse_movement: Vec2) {
+        let sensitivity = (self.lookat - self.lookfrom).magnitude() * 0.001;
+        let forward = (self.lookat - self.lookfrom).normalize();
+        let right = forward.cross(self.vup).normalize();
+        let real_up = right.cross(forward);
+        let offset =
+            -right * mouse_movement.x * sensitivity + real_up * mouse_movement.y * sensitivity;
+        self.lookfrom += offset;
+        self.lookat += offset;
+    }
+
+    pub fn orbit(&mut self, mouse_movement: Vec2) {
+        let sensitivity = 0.003;
+        let eps = 0.001;
+        let offset = self.lookfrom - self.lookat;
+        let radius = offset.magnitude();
+        let mut theta = offset.z.atan2(offset.x);
+        let mut phi = (offset.y / radius).acos();
+        theta += mouse_movement.x * sensitivity;
+        phi -= mouse_movement.y * sensitivity;
+        phi = phi.clamp(eps, std::f32::consts::PI - eps);
+
+        let new_offset = Vec3::new(
+            radius * phi.sin() * theta.cos(),
+            radius * phi.cos(),
+            radius * phi.sin() * theta.sin(),
+        );
+        self.lookfrom = self.lookat + new_offset;
+    }
+
+    pub fn zoom(&mut self, delta: f32) {
+        let sensitivity = 0.001;
+        let zoom = 1.0 - delta * sensitivity;
+        let offset = (self.lookfrom - self.lookat) * zoom;
+        self.lookfrom = self.lookat + offset;
+    }
 }
 
 #[repr(C)]

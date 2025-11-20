@@ -20,6 +20,7 @@ pub struct Scene {
     pub camera_uniforms: CameraUniforms,
     pub scene_uniforms_buffer: wgpu::Buffer,
     pub camera_uniforms_buffer: wgpu::Buffer,
+    pub accum_pixel_buffer: wgpu::Buffer,
     pub scene_bind_group: wgpu::BindGroup,
 }
 impl Scene {
@@ -131,6 +132,7 @@ impl Scene {
             camera_uniforms,
             scene_uniforms_buffer,
             camera_uniforms_buffer,
+            accum_pixel_buffer,
             scene_bind_group,
         }
     }
@@ -513,17 +515,24 @@ pub fn simple_light(device: &wgpu::Device) -> Scene {
         vec3(3.0, 1.0, -2.0),
         vec3(2.0, 0.0, 0.0),
         vec3(0.0, 2.0, 0.0),
-        difflight,
+        difflight.clone(),
     ));
 
-    Scene::new(device, camera, Rc::new(world), None)
+    let lights = Quad::new(
+        vec3(3.0, 1.0, -2.0),
+        vec3(2.0, 0.0, 0.0),
+        vec3(0.0, 2.0, 0.0),
+        difflight,
+    );
+
+    Scene::new(device, camera, Rc::new(world), Some(lights))
 }
 
 pub fn cornell_box(device: &wgpu::Device) -> Scene {
     let camera = Camera {
         image_width: 1080,
         image_height: 1080,
-        samples_per_pixel: 10,
+        samples_per_pixel: 200,
         max_depth: 50,
         samples_per_frame: 1,
         vfov: 40.0,
@@ -642,7 +651,7 @@ pub fn cornell_smoke(device: &wgpu::Device) -> Scene {
         vec3(113.0, 554.0, 127.0),
         vec3(330.0, 0.0, 0.0),
         vec3(0.0, 0.0, 305.0),
-        light,
+        light.clone(),
     ));
     world.add(Quad::new(
         vec3(0.0, 0.0, 0.0),
@@ -678,7 +687,14 @@ pub fn cornell_smoke(device: &wgpu::Device) -> Scene {
     world.add(ConstantMedium::from_color(box1, 0.01, vec3(0.0, 0.0, 0.0)));
     world.add(ConstantMedium::from_color(box2, 0.01, vec3(1.0, 1.0, 1.0)));
 
-    Scene::new(device, camera, Rc::new(world), None)
+    let lights = Quad::new(
+        vec3(113.0, 554.0, 127.0),
+        vec3(330.0, 0.0, 0.0),
+        vec3(0.0, 0.0, 305.0),
+        light,
+    );
+
+    Scene::new(device, camera, Rc::new(world), Some(lights))
 }
 
 pub fn final_scene(device: &wgpu::Device) -> Scene {
