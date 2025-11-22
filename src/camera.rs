@@ -94,7 +94,7 @@ impl Camera {
 
     pub fn zoom(&mut self, delta: f32) {
         let sensitivity = 0.001;
-        let zoom = 1.0 - delta * sensitivity;
+        let zoom = (1.0 - delta * sensitivity).max(0.1);
         let offset = (self.lookfrom - self.lookat) * zoom;
         self.lookfrom = self.lookat + offset;
     }

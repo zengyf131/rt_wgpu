@@ -160,6 +160,11 @@ impl EguiRenderer {
                                 );
                                 ui.selectable_value(
                                     &mut rc.scene_enum,
+                                    SceneEnum::CornellGlass,
+                                    "CornellGlass",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
                                     SceneEnum::CornellSmoke,
                                     "CornellSmoke",
                                 );

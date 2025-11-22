@@ -228,6 +228,7 @@ pub enum SceneEnum {
     Quads,
     SimpleLight,
     CornellBox,
+    CornellGlass,
     CornellSmoke,
     FinalScene,
 }
@@ -241,6 +242,7 @@ pub fn get_scene(device: &wgpu::Device, scene_enum: SceneEnum) -> Scene {
         SceneEnum::Quads => quads(device),
         SceneEnum::SimpleLight => simple_light(device),
         SceneEnum::CornellBox => cornell_box(device),
+        SceneEnum::CornellGlass => cornell_glass(device),
         SceneEnum::CornellSmoke => cornell_smoke(device),
         SceneEnum::FinalScene => final_scene(device),
     }
@@ -601,6 +603,91 @@ pub fn cornell_box(device: &wgpu::Device) -> Scene {
     let box2 = RotateY::new(box2, degrees(-18.0));
     let box2 = Translate::new(box2, vec3(130.0, 0.0, 65.0));
     world.add(box2);
+
+    let lights = Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light,
+    );
+
+    Scene::new(device, camera, Rc::new(world), Some(lights))
+}
+
+pub fn cornell_glass(device: &wgpu::Device) -> Scene {
+    let camera = Camera {
+        image_width: 1080,
+        image_height: 1080,
+        samples_per_pixel: 200,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 40.0,
+        lookfrom: vec3(278.0, 278.0, -800.0),
+        lookat: vec3(278.0, 278.0, 0.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = PrimitiveList::new();
+
+    let red = Lambertian::from_color(vec3(0.65, 0.05, 0.05));
+    let white = Lambertian::from_color(vec3(0.73, 0.73, 0.73));
+    let green = Lambertian::from_color(vec3(0.12, 0.45, 0.15));
+    let light = DiffuseLight::from_color(vec3(15.0, 15.0, 15.0));
+
+    world.add(Quad::new(
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        green,
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        red,
+    ));
+    world.add(Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(555.0, 555.0, 555.0),
+        vec3(-555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 555.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        white.clone(),
+    ));
+
+    let metal = Metal::new(vec3(1.0, 1.0, 1.0), 0.1);
+    let box1 = quad_box(
+        vec3(0.0, 0.0, 0.0),
+        vec3(165.0, 330.0, 165.0),
+        metal,
+    );
+    let box1 = RotateY::new(box1, degrees(15.0));
+    let box1 = Translate::new(box1, vec3(265.0, 0.0, 295.0));
+    world.add(box1);
+
+    let glass = Dielectric::new(1.5);
+    let sphere = Sphere::sphere(vec3(80.0, 80.0, 80.0), 80.0, glass);
+    let sphere = Translate::new(sphere, vec3(130.0, 0.0, 65.0));
+    world.add(sphere);
 
     let lights = Quad::new(
         vec3(343.0, 554.0, 332.0),
