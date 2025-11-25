@@ -1,3 +1,4 @@
+use std::io::Cursor;
 use wgpu::util::DeviceExt;
 
 use crate::camera::{Camera, CameraUniforms};
@@ -18,6 +19,9 @@ pub struct PrintTexture {
     render_view: Option<wgpu::TextureView>,
     render_sampler: Option<wgpu::Sampler>,
     print_bind_group: Option<wgpu::BindGroup>,
+
+    staging_buffer: Option<wgpu::Buffer>,
+    image_wh: Option<Vector2<u32>>,
 }
 impl PrintTexture {
     pub fn new(
@@ -112,6 +116,9 @@ impl PrintTexture {
             render_view: None,
             render_sampler: None,
             print_bind_group: None,
+
+            staging_buffer: None,
+            image_wh: None,
         }
     }
 
@@ -134,7 +141,8 @@ impl PrintTexture {
             format: config.format,
             usage: wgpu::TextureUsages::TEXTURE_BINDING
                 | wgpu::TextureUsages::COPY_DST
-                | wgpu::TextureUsages::RENDER_ATTACHMENT,
+                | wgpu::TextureUsages::RENDER_ATTACHMENT
+                | wgpu::TextureUsages::COPY_SRC,
             view_formats: &[],
         });
         let render_view = render_texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -162,14 +170,86 @@ impl PrintTexture {
             label: Some("print_bind_group"),
         });
 
+        let padded_bytes_per_row = ((scene.camera.image_width * 4 + 255) / 256) * 256;
+        let staging_buffer = device.create_buffer(&wgpu::BufferDescriptor {
+            label: Some("Staging Buffer"),
+            size: (padded_bytes_per_row * scene.camera.image_height) as u64,
+            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
+            mapped_at_creation: false,
+        });
+
         self.render_texture = Some(render_texture);
         self.render_view = Some(render_view);
         self.render_sampler = Some(render_sampler);
         self.print_bind_group = Some(print_bind_group);
+        self.staging_buffer = Some(staging_buffer);
+        self.image_wh = Some(vec2(scene.camera.image_width, scene.camera.image_height));
     }
 
     pub fn target_view(&self) -> &wgpu::TextureView {
         self.render_view.as_ref().unwrap()
+    }
+
+    pub fn download(&self, encoder: &mut wgpu::CommandEncoder) {
+        let filename = String::from("render.png");
+        let tex_wh = self.image_wh.unwrap();
+        let unpadded_bytes_per_row = tex_wh.x * 4;
+        let padded_bytes_per_row = ((unpadded_bytes_per_row + 255) / 256) * 256;
+
+        encoder.copy_texture_to_buffer(
+            wgpu::TexelCopyTextureInfo {
+                texture: self.render_texture.as_ref().unwrap(),
+                mip_level: 0,
+                origin: wgpu::Origin3d::ZERO,
+                aspect: wgpu::TextureAspect::All,
+            },
+            wgpu::TexelCopyBufferInfo {
+                buffer: self.staging_buffer.as_ref().unwrap(),
+                layout: wgpu::TexelCopyBufferLayout {
+                    offset: 0,
+                    bytes_per_row: Some(padded_bytes_per_row),
+                    rows_per_image: Some(tex_wh.y),
+                },
+            },
+            wgpu::Extent3d {
+                width: tex_wh.x,
+                height: tex_wh.y,
+                depth_or_array_layers: 1,
+            },
+        );
+
+        let staging_buffer = self.staging_buffer.as_ref().unwrap().clone();
+        encoder.map_buffer_on_submit(
+            self.staging_buffer.as_ref().unwrap(),
+            wgpu::MapMode::Read,
+            ..,
+            move |res| {
+                if res.is_ok() {
+                    let bytes = staging_buffer.get_mapped_range(..).to_vec();
+                    staging_buffer.unmap();
+
+                    let mut image_data = vec![0u8; (tex_wh.x * tex_wh.y * 4) as usize];
+                    // Remove padding
+                    for y in 0..tex_wh.y {
+                        let src_offset = (y * padded_bytes_per_row) as usize;
+                        let dst_offset = (y * unpadded_bytes_per_row) as usize;
+
+                        image_data[dst_offset..dst_offset + unpadded_bytes_per_row as usize]
+                            .copy_from_slice(
+                                &bytes[src_offset..src_offset + unpadded_bytes_per_row as usize],
+                            );
+                    }
+                    // BGRA to RGBA
+                    for p in 0..(tex_wh.x * tex_wh.y) as usize {
+                        let tmp = image_data[4 * p];
+                        image_data[4 * p] = image_data[4 * p + 2];
+                        image_data[4 * p + 2] = tmp;
+                    }
+                    let img = image::ImageBuffer::from_raw(tex_wh.x, tex_wh.y, image_data).unwrap();
+                    download_image(&img, filename);
+                }
+            },
+        );
     }
 }
 impl Renderer for PrintTexture {
@@ -214,6 +294,26 @@ impl Renderer for PrintTexture {
     }
 
     fn print(&self, encoder: &mut wgpu::CommandEncoder) {}
+}
+
+pub fn download_image(img: &image::ImageBuffer<image::Rgba<u8>, Vec<u8>>, filename: String) {
+    let mut png_data: Vec<u8> = Vec::new();
+    let mut cursor = Cursor::new(&mut png_data);
+    img.write_to(&mut cursor, image::ImageFormat::Png)
+        .expect("Error encoding image to png.");
+
+    let task = rfd::AsyncFileDialog::new()
+        .add_filter("image", &["png"])
+        .set_file_name(filename.clone())
+        .save_file();
+    execute_future(async move {
+        let file = task.await;
+        if let Some(file) = file {
+            file.write(png_data.as_slice())
+                .await
+                .expect(format!("Error saving {}", filename).as_str());
+        }
+    });
 }
 
 #[repr(C)]

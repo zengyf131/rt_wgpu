@@ -269,9 +269,14 @@ impl EguiRenderer {
                                             .ceil()
                                 ));
                             }
+                            ui.end_row();
 
                             if ui.button("Config").clicked() {
                                 rd.render_status = RenderStatus::Config;
+                            }
+
+                            if ui.button("Download").clicked() {
+                                rd.download_image = true;
                             }
                         });
                 });

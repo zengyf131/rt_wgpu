@@ -275,6 +275,17 @@ impl State {
             self.render_data.render_status = RenderStatus::Render;
             self.scene = scene;
         }
+
+        if self.render_data.download_image {
+            self.render_data.download_image = false;
+            let mut encoder = self
+                .device
+                .create_command_encoder(&wgpu::CommandEncoderDescriptor {
+                    label: Some("Authoring Download Encoder"),
+                });
+            self.renderer_texture.download(&mut encoder);
+            self.queue.submit(std::iter::once(encoder.finish()));
+        }
     }
 
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {

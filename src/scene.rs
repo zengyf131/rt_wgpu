@@ -675,11 +675,7 @@ pub fn cornell_glass(device: &wgpu::Device) -> Scene {
     ));
 
     let metal = Metal::new(vec3(1.0, 1.0, 1.0), 0.1);
-    let box1 = quad_box(
-        vec3(0.0, 0.0, 0.0),
-        vec3(165.0, 330.0, 165.0),
-        metal,
-    );
+    let box1 = quad_box(vec3(0.0, 0.0, 0.0), vec3(165.0, 330.0, 165.0), metal);
     let box1 = RotateY::new(box1, degrees(15.0));
     let box1 = Translate::new(box1, vec3(265.0, 0.0, 295.0));
     world.add(box1);

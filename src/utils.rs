@@ -90,3 +90,9 @@ impl Timer {
         self.paused
     }
 }
+
+/// Executes an async Future on the current thread
+#[inline(always)]
+pub fn execute_future<F: Future<Output = ()> + 'static>(f: F) {
+    wasm_bindgen_futures::spawn_local(f);
+}

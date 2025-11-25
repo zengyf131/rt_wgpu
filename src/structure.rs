@@ -32,6 +32,8 @@ pub struct RenderData {
     pub mouse_key: MouseButton,
     pub mouse_prev_pos: Option<Vec2>,
     pub image_dirty: bool,
+
+    pub download_image: bool,
 }
 impl RenderData {
     pub fn new() -> Self {
@@ -47,6 +49,8 @@ impl RenderData {
             mouse_key: MouseButton::Left,
             mouse_prev_pos: None,
             image_dirty: false,
+
+            download_image: false,
         }
     }
 
