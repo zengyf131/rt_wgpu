@@ -1442,6 +1442,7 @@ fn random_u32(state: ptr<function, u32>) -> u32 {
     return (word >> 22u) ^ word;
 }
 
+// [0, 1]
 fn random_f32(state: ptr<function, u32>) -> f32 {
     let x = random_u32(state);
     return f32(x) / f32(0xffffffffu);
@@ -1491,11 +1492,13 @@ fn random_vec3_in_unit_disk(state: ptr<function, u32>) -> vec3<f32> {
 
 fn random_cosine_direction(state: ptr<function, u32>) -> vec3<f32> {
     let r1 = random_f32(state);
-    let r2 = random_f32(state);
+    var r2 = random_f32(state);
     let phi = 2.0 * PI * r1;
     let x = cos(phi) * sqrt(r2);
     let y = sin(phi) * sqrt(r2);
-    let z = sqrt(1.0 - r2);
+    var z = sqrt(1.0 - r2);
+    // Prevent 0 pdf
+    z = clamp(z, 1e-8, 1.0);
 
     return vec3(x, y, z);
 }

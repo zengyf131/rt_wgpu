@@ -19,7 +19,6 @@ use crate::structure::*;
 use crate::utils::*;
 use crate::wfpt::WavefrontPathTracing;
 
-// This will store the state of our game
 pub struct State {
     surface: wgpu::Surface<'static>,
     device: wgpu::Device,
@@ -41,14 +40,10 @@ pub struct State {
 }
 
 impl State {
-    // We don't need this to be async right now,
-    // but we will in the next tutorial
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
         let size = PhysicalSize::<u32>::new(1920, 1080);
         let _ = window.request_inner_size(size);
 
-        // The instance is a handle to our GPU
-        // BackendBit::PRIMARY => Vulkan + Metal + DX12 + Browser WebGPU
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
             backends: wgpu::Backends::PRIMARY,
@@ -72,8 +67,6 @@ impl State {
                 label: None,
                 required_features: wgpu::Features::empty(),
                 experimental_features: wgpu::ExperimentalFeatures::disabled(),
-                // WebGL doesn't support all of wgpu's features, so if
-                // we're building for the web we'll have to disable some.
                 required_limits: if cfg!(target_arch = "wasm32") {
                     wgpu::Limits {
                         max_storage_buffer_binding_size: 1 << 30,
@@ -94,9 +87,6 @@ impl State {
 
         let surface_caps = surface.get_capabilities(&adapter);
         // log!("{:?}", surface_caps);
-        // Shader code in this tutorial assumes an sRGB surface texture. Using a different
-        // one will result in all the colors coming out darker. If you want to support non
-        // sRGB surfaces, you'll need to account for that when drawing to the frame.
         let surface_format = surface_caps
             .formats
             .iter()
@@ -193,6 +183,11 @@ impl State {
                     self.render_data.timer.reset();
                     self.render_data.image_dirty = true;
                     self.render_data.mouse_prev_pos = Some(current_pos);
+                    log!(
+                        "Camera from {:?}, at {:?}",
+                        self.scene.camera.lookfrom,
+                        self.scene.camera.lookat
+                    );
                 }
             } else {
                 self.render_data.mouse_prev_pos = Some(current_pos);
@@ -291,7 +286,6 @@ impl State {
     pub fn render(&mut self) -> Result<(), wgpu::SurfaceError> {
         self.window.request_redraw();
 
-        // We can't render unless the surface is configured
         if !self.is_surface_configured {
             return Ok(());
         }
@@ -366,7 +360,6 @@ impl State {
             );
         }
 
-        // submit will accept anything that implements IntoIter
         self.queue.submit(std::iter::once(encoder.finish()));
         output.present();
 

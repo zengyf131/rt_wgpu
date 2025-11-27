@@ -148,6 +148,11 @@ impl EguiRenderer {
                                     SceneEnum::SimpleLight,
                                     "SimpleLight",
                                 );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::GlassBox,
+                                    "GlassBox",
+                                );
                             });
                             ui.end_row();
 
@@ -172,6 +177,26 @@ impl EguiRenderer {
                                     &mut rc.scene_enum,
                                     SceneEnum::FinalScene,
                                     "FinalScene",
+                                );
+                            });
+                            ui.end_row();
+
+                            ui.label("");
+                            ui.horizontal(|ui| {
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::Primitives,
+                                    "Primitives",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::Materials,
+                                    "Materials",
+                                );
+                                ui.selectable_value(
+                                    &mut rc.scene_enum,
+                                    SceneEnum::Textures,
+                                    "Textures",
                                 );
                             });
                             ui.end_row();
@@ -212,7 +237,7 @@ impl EguiRenderer {
                             ui.end_row();
 
                             ui.label("Samples Per Pixel");
-                            ui.add(Slider::new(&mut rc.samples_per_pixel, 0..=1000));
+                            ui.add(Slider::new(&mut rc.samples_per_pixel, 0..=10000));
                             ui.end_row();
 
                             if ui.button("Render").clicked() {

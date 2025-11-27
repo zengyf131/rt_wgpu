@@ -227,10 +227,14 @@ pub enum SceneEnum {
     PerlinSpheres,
     Quads,
     SimpleLight,
+    GlassBox,
     CornellBox,
     CornellGlass,
     CornellSmoke,
     FinalScene,
+    Primitives,
+    Materials,
+    Textures,
 }
 
 pub fn get_scene(device: &wgpu::Device, scene_enum: SceneEnum) -> Scene {
@@ -241,10 +245,14 @@ pub fn get_scene(device: &wgpu::Device, scene_enum: SceneEnum) -> Scene {
         SceneEnum::PerlinSpheres => perlin_spheres(device),
         SceneEnum::Quads => quads(device),
         SceneEnum::SimpleLight => simple_light(device),
+        SceneEnum::GlassBox => glass_box(device),
         SceneEnum::CornellBox => cornell_box(device),
         SceneEnum::CornellGlass => cornell_glass(device),
         SceneEnum::CornellSmoke => cornell_smoke(device),
         SceneEnum::FinalScene => final_scene(device),
+        SceneEnum::Primitives => primitives(device),
+        SceneEnum::Materials => materials(device),
+        SceneEnum::Textures => textures(device),
     }
 }
 
@@ -528,6 +536,65 @@ pub fn simple_light(device: &wgpu::Device) -> Scene {
     );
 
     Scene::new(device, camera, Rc::new(world), Some(lights))
+}
+
+pub fn glass_box(device: &wgpu::Device) -> Scene {
+    let camera = Camera {
+        image_width: 1920,
+        image_height: 1080,
+        samples_per_pixel: 100,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 20.0,
+        lookfrom: vec3(-32.0, 45.0, -106.0),
+        lookat: vec3(-2.0, 4.0, -2.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = PrimitiveList::new();
+
+    world.add(Quad::new(
+        vec3(-50.0, 0.0, -50.0),
+        vec3(100.0, 0.0, 0.0),
+        vec3(0.0, 0.0, 100.0),
+        Lambertian::from_color(vec3(1.0, 1.0, 1.0)),
+    ));
+    world.add(Quad::new(
+        vec3(-50.0, 0.0, 50.0),
+        vec3(100.0, 0.0, 0.0),
+        vec3(0.0, 100.0, 0.0),
+        Lambertian::from_color(vec3(0.1, 0.1, 0.8)),
+    ));
+    world.add(Quad::new(
+        vec3(50.0, 0.0, -50.0),
+        vec3(0.0, 100.0, 0.0),
+        vec3(0.0, 0.0, 100.0),
+        Lambertian::from_color(vec3(0.8, 0.1, 0.1)),
+    ));
+
+    let glass_box = quad_box(
+        vec3(0.0, 0.0, 0.0),
+        vec3(10.0, 20.0, 10.0),
+        Dielectric::new(1.2),
+    );
+    world.add(glass_box);
+
+    let difflight = DiffuseLight::from_color(vec3(120.0, 120.0, 100.0));
+    // let light = quad_box(
+    //     vec3(0.0, 0.0, 0.0),
+    //     vec3(10.0, 20.0, 10.0),
+    //     Dielectric::new(1.5),
+    // );
+    world.add(Sphere::sphere(
+        vec3(40.0, 50.0, 40.0),
+        5.0,
+        difflight.clone(),
+    ));
+
+    Scene::new(device, camera, Rc::new(world), None)
 }
 
 pub fn cornell_box(device: &wgpu::Device) -> Scene {
@@ -897,6 +964,258 @@ pub fn final_scene(device: &wgpu::Device) -> Scene {
         vec3(300.0, 0.0, 0.0),
         vec3(0.0, 0.0, 265.0),
         light.clone(),
+    );
+
+    Scene::new(device, camera, Rc::new(world), Some(lights))
+}
+
+pub fn primitives(device: &wgpu::Device) -> Scene {
+    let camera = Camera {
+        image_width: 1920,
+        image_height: 1080,
+        samples_per_pixel: 200,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 40.0,
+        lookfrom: vec3(278.0, 80.0, -60.0),
+        lookat: vec3(278.0, 15.0, 200.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = PrimitiveList::new();
+
+    let red = Lambertian::from_color(vec3(0.65, 0.05, 0.05));
+    let white = Lambertian::from_color(vec3(0.73, 0.73, 0.73));
+    let green = Lambertian::from_color(vec3(0.12, 0.45, 0.15));
+    let light = DiffuseLight::from_color(vec3(15.0, 15.0, 15.0));
+
+    world.add(Quad::new(
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        green,
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        red,
+    ));
+    world.add(Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(555.0, 555.0, 555.0),
+        vec3(-555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 555.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        white.clone(),
+    ));
+
+    world.add(Sphere::sphere(
+        vec3(378.0, 25.0, 200.0),
+        25.0,
+        white.clone(),
+    ));
+
+    let box1 = quad_box(
+        vec3(-25.0, 0.0, -25.0),
+        vec3(25.0, 50.0, 25.0),
+        white.clone(),
+    );
+    let box1 = RotateY::new(box1, degrees(-18.0));
+    let box1 = Translate::new(box1, vec3(278.0, 0.0, 200.0));
+    world.add(box1);
+
+    let box2 = quad_box(
+        vec3(-25.0, 0.0, -25.0),
+        vec3(25.0, 50.0, 25.0),
+        white.clone(),
+    );
+    let box2 = Translate::new(box2, vec3(178.0, 0.0, 200.0));
+
+    world.add(ConstantMedium::from_color(box2, 0.1, vec3(1.0, 1.0, 1.0)));
+
+    let lights = Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light,
+    );
+
+    Scene::new(device, camera, Rc::new(world), Some(lights))
+}
+
+pub fn materials(device: &wgpu::Device) -> Scene {
+    let camera = Camera {
+        image_width: 1920,
+        image_height: 1080,
+        samples_per_pixel: 200,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 40.0,
+        lookfrom: vec3(278.0, 80.0, -60.0),
+        lookat: vec3(278.0, 15.0, 200.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = PrimitiveList::new();
+
+    let red = Lambertian::from_color(vec3(0.65, 0.05, 0.05));
+    let white = Lambertian::from_color(vec3(0.73, 0.73, 0.73));
+    let green = Lambertian::from_color(vec3(0.12, 0.45, 0.15));
+    let light = DiffuseLight::from_color(vec3(15.0, 15.0, 15.0));
+
+    world.add(Quad::new(
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        green,
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        red,
+    ));
+    world.add(Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(555.0, 555.0, 555.0),
+        vec3(-555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 555.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        white.clone(),
+    ));
+
+    let mat1 = white.clone();
+    world.add(Sphere::sphere(vec3(378.0, 25.0, 200.0), 25.0, mat1));
+    let mat2 = Metal::new(vec3(0.8, 0.6, 0.2), 0.1);
+    world.add(Sphere::sphere(vec3(278.0, 25.0, 200.0), 25.0, mat2));
+    let mat3 = Dielectric::new(1.2);
+    world.add(Sphere::sphere(vec3(178.0, 25.0, 200.0), 25.0, mat3));
+
+    let lights = Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light,
+    );
+
+    Scene::new(device, camera, Rc::new(world), Some(lights))
+}
+
+pub fn textures(device: &wgpu::Device) -> Scene {
+    let camera = Camera {
+        image_width: 1920,
+        image_height: 1080,
+        samples_per_pixel: 200,
+        max_depth: 50,
+        samples_per_frame: 1,
+        vfov: 40.0,
+        lookfrom: vec3(278.0, 80.0, -60.0),
+        lookat: vec3(278.0, 15.0, 200.0),
+        vup: vec3(0.0, 1.0, 0.0),
+        defocus_angle: 0.0,
+        focus_dist: 10.0,
+        background: vec3(0.0, 0.0, 0.0),
+    };
+
+    let mut world = PrimitiveList::new();
+
+    let red = Lambertian::from_color(vec3(0.65, 0.05, 0.05));
+    let white = Lambertian::from_color(vec3(0.73, 0.73, 0.73));
+    let green = Lambertian::from_color(vec3(0.12, 0.45, 0.15));
+    let light = DiffuseLight::from_color(vec3(15.0, 15.0, 15.0));
+
+    world.add(Quad::new(
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        green,
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        red,
+    ));
+    world.add(Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 0.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, 555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(555.0, 555.0, 555.0),
+        vec3(-555.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -555.0),
+        white.clone(),
+    ));
+    world.add(Quad::new(
+        vec3(0.0, 0.0, 555.0),
+        vec3(555.0, 0.0, 0.0),
+        vec3(0.0, 555.0, 0.0),
+        white.clone(),
+    ));
+
+    let mat1 = Lambertian::new(CheckerTexture::from_colors(
+        10.0,
+        vec3(0.2, 0.3, 0.1),
+        vec3(0.9, 0.9, 0.9),
+    ));
+    world.add(Sphere::sphere(vec3(378.0, 25.0, 200.0), 25.0, mat1));
+    let mat2 = Lambertian::new(ImageTexture::from_bytes(include_bytes!("earthmap.jpg")));
+    world.add(Sphere::sphere(vec3(278.0, 25.0, 200.0), 25.0, mat2));
+    let mat3 = Lambertian::new(NoiseTexture::new(0.8));
+    world.add(Sphere::sphere(vec3(178.0, 25.0, 200.0), 25.0, mat3));
+
+    let lights = Quad::new(
+        vec3(343.0, 554.0, 332.0),
+        vec3(-130.0, 0.0, 0.0),
+        vec3(0.0, 0.0, -105.0),
+        light,
     );
 
     Scene::new(device, camera, Rc::new(world), Some(lights))
