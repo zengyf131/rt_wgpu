@@ -1,6 +1,8 @@
 # WebGPU Ray Tracing Renderer
 
-This is a Ray Tracing Renderer written in Rust and WGSL (WebGPU Shading Language). It is derived from the [Ray Tracing in One Weekend](https://github.com/RayTracing/raytracing.github.io) series, extended with more functionalities such as Wavefront Path Tracing. It serves as a course project of Advance Computer Graphics (COMP 5411) of HKUST. 
+This is a Ray Tracing Renderer written in Rust and WGSL (WebGPU Shading Language). It serves as a course project of Advance Computer Graphics (COMP 5411) of HKUST. 
+
+It is derived from and heavily inspired by the [Ray Tracing in One Weekend](https://github.com/RayTracing/raytracing.github.io) series, which is a great tutorial for building an offline CPU-based Path Tracing renderer from scratch. This renderer reimplements it with WebGPU and extends it with more functionalities such as Wavefront Path Tracing and multiple importance sampling. 
 
 An online demo is available [here](https://yunfan.zone/rt_wgpu). A technical report is included [here](report.pdf). 
 
