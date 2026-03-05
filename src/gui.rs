@@ -255,6 +255,12 @@ impl EguiRenderer {
                         .show(ui, |ui| {
                             let camera = &scene.camera;
 
+                            ui.label(format!(
+                                "Resolution: {}x{}",
+                                camera.image_width, camera.image_height
+                            ));
+                            ui.end_row();
+
                             let cur_samples = u32::min(
                                 rd.frame_id * camera.samples_per_frame,
                                 camera.samples_per_pixel,
@@ -263,7 +269,7 @@ impl EguiRenderer {
                             if cur_samples < camera.samples_per_pixel {
                                 rd.timer.start();
                                 ui.label(format!(
-                                    "Samples {}/{}",
+                                    "Samples: {}/{}",
                                     cur_samples, camera.samples_per_pixel
                                 ));
                                 ui.end_row();
@@ -271,7 +277,7 @@ impl EguiRenderer {
                                 ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
                                 ui.end_row();
                                 ui.label(format!(
-                                    "Avg frame time: {:.2}ms",
+                                    "Avg sample time: {:.2}ms",
                                     rd.timer.elapsed() / (rd.frame_id as f64 - 1.0)
                                 ));
                                 // log!("Samples {}/{}", cur_samples, rd.samples_per_pixel);
@@ -279,7 +285,7 @@ impl EguiRenderer {
                             } else {
                                 rd.timer.pause();
                                 ui.label(format!(
-                                    "Samples {}/{}",
+                                    "Samples: {}/{}",
                                     cur_samples, camera.samples_per_pixel
                                 ));
                                 ui.end_row();
@@ -287,7 +293,7 @@ impl EguiRenderer {
                                 ui.label(format!("Render time: {:.2}ms", rd.timer.elapsed()));
                                 ui.end_row();
                                 ui.label(format!(
-                                    "Avg frame time: {:.2}ms",
+                                    "Avg sample time: {:.2}ms",
                                     rd.timer.elapsed()
                                         / (camera.samples_per_pixel as f64
                                             / camera.samples_per_frame as f64)

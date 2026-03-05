@@ -41,8 +41,9 @@ pub struct State {
 
 impl State {
     pub async fn new(window: Arc<Window>) -> anyhow::Result<Self> {
-        let size = PhysicalSize::<u32>::new(1920, 1080);
-        let _ = window.request_inner_size(size);
+        let size = window.inner_size();
+        // let size = PhysicalSize::<u32>::new(1920, 1080);
+        // let _ = window.request_inner_size(size);
 
         let instance = wgpu::Instance::new(&wgpu::InstanceDescriptor {
             #[cfg(not(target_arch = "wasm32"))]
@@ -342,7 +343,7 @@ impl State {
         if self.gui_enable {
             let screen_descriptor = egui_wgpu::ScreenDescriptor {
                 size_in_pixels: [self.config.width, self.config.height],
-                pixels_per_point: self.window.scale_factor() as f32,
+                pixels_per_point: 1.5 * self.window.scale_factor() as f32,
             };
 
             self.egui_renderer.begin_frame(&self.window);
