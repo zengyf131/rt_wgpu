@@ -1,0 +1,15 @@
+{
+  "name": "raytracing",
+  "type": "module",
+  "version": "0.1.0",
+  "files": [
+    "raytracing_bg.wasm",
+    "raytracing.js",
+    "raytracing.d.ts"
+  ],
+  "main": "raytracing.js",
+  "types": "raytracing.d.ts",
+  "sideEffects": [
+    "./snippets/*"
+  ]
+}
